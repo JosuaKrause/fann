@@ -137,7 +137,7 @@ where
             .children
             .iter()
             .map(|child| Node::get_child_dist_max(child))
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .max_by(|a, b| a.total_cmp(b))
             .unwrap_or(0.0);
     }
 
@@ -149,7 +149,7 @@ where
             center_dist,
         });
         self.children
-            .sort_unstable_by(|a, b| a.center_dist.partial_cmp(&b.center_dist).unwrap().reverse());
+            .sort_unstable_by(|a, b| a.center_dist.total_cmp(&b.center_dist).reverse());
     }
 
     fn get_closest<'t>(
@@ -177,7 +177,7 @@ where
             C: Cache,
         {
             let element = (node.centroid_index, distance);
-            let mindex = res.binary_search_by(|&(_, dist)| dist.partial_cmp(&distance).unwrap());
+            let mindex = res.binary_search_by(|&(_, dist)| dist.total_cmp(&distance));
             match mindex {
                 Ok(index) => res.insert(index, element),
                 Err(index) => res.insert(index, element),
@@ -201,7 +201,7 @@ where
                 .iter()
                 .map(|child| (&child.node, child.node.get_dist_min(embed, distance, cache)))
                 .collect::<Vec<(&Node<D, C, T>, f64)>>();
-            inners.sort_unstable_by(|(_, dist_a), (_, dist_b)| dist_a.partial_cmp(dist_b).unwrap());
+            inners.sort_unstable_by(|(_, dist_a), (_, dist_b)| dist_a.total_cmp(dist_b));
             for (cnode, cmin) in inners.iter() {
                 if max_dist(res, count) < *cmin {
                     continue;
@@ -408,7 +408,7 @@ where
                         .min_by(|(a, _), (b, _)| {
                             let dist_a = self.get_dist(&embed, &self.get_embed(*a));
                             let dist_b = self.get_dist(&embed, &self.get_embed(*b));
-                            dist_a.partial_cmp(&dist_b).unwrap()
+                            dist_a.total_cmp(&dist_b)
                         })
                         .unwrap();
                     best.push(ix);
