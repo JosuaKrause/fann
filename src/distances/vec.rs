@@ -1,5 +1,6 @@
 use crate::{
-    cache::NoCache, Distance, DistanceCmp, Embedding, EmbeddingProvider, NearestNeighbors,
+    cache::NoCache, info::Info, Distance, DistanceCmp, Embedding, EmbeddingProvider,
+    NearestNeighbors,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -85,12 +86,16 @@ impl<'a, D> NearestNeighbors<NoCache, &'a Vec<f64>> for VecProvider<'a, D>
 where
     D: Distance<&'a Vec<f64>>,
 {
-    fn get_closest(
+    fn get_closest<I>(
         &self,
         embed: &Embedding<&'a Vec<f64>>,
         count: usize,
         _cache: &mut NoCache,
-    ) -> Vec<(usize, f64)> {
+        _info: &mut I,
+    ) -> Vec<(usize, f64)>
+    where
+        I: Info,
+    {
         let mut dists: Vec<(usize, DistanceCmp)> = self
             .embeddings
             .iter()

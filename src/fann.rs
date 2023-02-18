@@ -5,7 +5,9 @@ use std::{
     marker::PhantomData,
 };
 
-use crate::{Cache, Distance, DistanceCmp, Embedding, EmbeddingProvider, NearestNeighbors};
+use crate::{
+    info::Info, Cache, Distance, DistanceCmp, Embedding, EmbeddingProvider, NearestNeighbors,
+};
 
 const HIGHLIGHT_A: &str = "*";
 const HIGHLIGHT_B: &str = ":";
@@ -71,13 +73,31 @@ where
         self.children.len()
     }
 
-    fn get_dist(&self, embed: &Embedding<T>, provider: &'a E, cache: &mut C) -> DistanceCmp {
+    fn get_dist<I>(
+        &self,
+        embed: &Embedding<T>,
+        provider: &'a E,
+        cache: &mut C,
+        info: &mut I,
+    ) -> DistanceCmp
+    where
+        I: Info,
+    {
         let distance = provider.distance();
-        cache.cached_distance(&self.get_embed(provider), embed, distance)
+        cache.cached_distance(&self.get_embed(provider), embed, distance, info)
     }
 
-    fn get_dist_min(&self, embed: &Embedding<T>, provider: &'a E, cache: &mut C) -> DistanceCmp {
-        let dist = self.get_dist(embed, provider, cache);
+    fn get_dist_min<I>(
+        &self,
+        embed: &Embedding<T>,
+        provider: &'a E,
+        cache: &mut C,
+        info: &mut I,
+    ) -> DistanceCmp
+    where
+        I: Info,
+    {
+        let dist = self.get_dist(embed, provider, cache, info);
         dist.combine(&self.radius, |d, radius| f64::max(0.0, d - radius))
     }
 
@@ -98,8 +118,16 @@ where
             .unwrap_or(DistanceCmp::zero());
     }
 
-    fn add_child(&mut self, child: Node<'a, E, D, C, T>, provider: &'a E, cache: &mut C) {
-        let center_dist = self.get_dist(&child.get_embed(provider), provider, cache);
+    fn add_child<I>(
+        &mut self,
+        child: Node<'a, E, D, C, T>,
+        provider: &'a E,
+        cache: &mut C,
+        info: &mut I,
+    ) where
+        I: Info,
+    {
+        let center_dist = self.get_dist(&child.get_embed(provider), provider, cache, info);
         self.count += child.count_descendants();
         self.children.push(Child {
             node: child,
@@ -109,15 +137,18 @@ where
             .sort_unstable_by(|a, b| a.center_dist.cmp(&b.center_dist).reverse());
     }
 
-    fn get_closest(
+    fn get_closest<I>(
         &self,
         res: &mut Vec<(usize, DistanceCmp)>,
         embed: &Embedding<T>,
         count: usize,
         provider: &'a E,
         cache: &mut C,
-    ) {
-        let own_dist = self.get_dist(embed, provider, cache);
+        info: &mut I,
+    ) where
+        I: Info,
+    {
+        let own_dist = self.get_dist(embed, provider, cache, info);
 
         fn max_dist(res: &Vec<(usize, DistanceCmp)>, count: usize) -> DistanceCmp {
             let index = count.min(res.len()) - 1;
@@ -147,27 +178,35 @@ where
         if res.len() < count || own_dist < max_dist(res, count) {
             add_node(res, self, own_dist, count);
         }
-        if self.radius < own_dist {
+        let is_outer = self.radius < own_dist;
+        info.log_scan(self.centroid_index, is_outer);
+        if is_outer {
             for child in self.children.iter() {
-                if max_dist(res, count)
-                    < own_dist.combine(&child.center_dist, |own, center| own - center)
-                {
+                let c_dist_est = own_dist.combine(&child.center_dist, |own, center| own - center);
+                if max_dist(res, count) < c_dist_est {
                     continue;
                 }
-                child.node.get_closest(res, embed, count, provider, cache);
+                child
+                    .node
+                    .get_closest(res, embed, count, provider, cache, info);
             }
         } else {
             let mut inners: Vec<(&Node<E, D, C, T>, DistanceCmp)> = self
                 .children
                 .iter()
-                .map(|child| (&child.node, child.node.get_dist_min(embed, provider, cache)))
+                .map(|child| {
+                    (
+                        &child.node,
+                        child.node.get_dist_min(embed, provider, cache, info),
+                    )
+                })
                 .collect::<Vec<(&Node<E, D, C, T>, DistanceCmp)>>();
             inners.sort_unstable_by(|(_, dist_a), (_, dist_b)| dist_a.cmp(dist_b));
             for (cnode, cmin) in inners.iter() {
                 if max_dist(res, count) < *cmin {
                     continue;
                 }
-                cnode.get_closest(res, embed, count, provider, cache);
+                cnode.get_closest(res, embed, count, provider, cache, info);
             }
         }
     }
@@ -307,16 +346,23 @@ where
         }
     }
 
-    fn get_dist(
+    fn get_dist<I>(
         &self,
         embed_a: &Embedding<T>,
         embed_b: &Embedding<T>,
         cache: &mut C,
-    ) -> DistanceCmp {
-        cache.cached_distance(embed_a, embed_b, self.provider.distance())
+        info: &mut I,
+    ) -> DistanceCmp
+    where
+        I: Info,
+    {
+        cache.cached_distance(embed_a, embed_b, self.provider.distance(), info)
     }
 
-    fn centroid(&self, all_ixs: &Vec<usize>, cache: &mut C) -> usize {
+    fn centroid<I>(&self, all_ixs: &Vec<usize>, cache: &mut C, info: &mut I) -> usize
+    where
+        I: Info,
+    {
         let provider = self.provider;
         let (res_ix, _) =
             all_ixs
@@ -330,9 +376,10 @@ where
                                 res
                             } else {
                                 let oembed = provider.get(oix);
-                                res.combine(&self.get_dist(&embed, &oembed, cache), |cur, dist| {
-                                    cur + dist
-                                })
+                                res.combine(
+                                    &self.get_dist(&embed, &oembed, cache, info),
+                                    |cur, dist| cur + dist,
+                                )
                             }
                         });
                     if best_ix.is_none() || cur_dist < best_dist {
@@ -344,12 +391,16 @@ where
         res_ix.unwrap()
     }
 
-    fn kmedoid(
+    fn kmedoid<I>(
         &self,
         all_ixs: Vec<usize>,
         k_num: usize,
         cache: &mut C,
-    ) -> Vec<(usize, Vec<usize>)> {
+        info: &mut I,
+    ) -> Vec<(usize, Vec<usize>)>
+    where
+        I: Info,
+    {
         if all_ixs.len() <= k_num {
             return all_ixs.iter().map(|&ix| (ix, Vec::new())).collect();
         }
@@ -371,8 +422,8 @@ where
                     let (_, best) = res
                         .iter_mut()
                         .min_by(|(a, _), (b, _)| {
-                            let dist_a = self.get_dist(&embed, &provider.get(*a), cache);
-                            let dist_b = self.get_dist(&embed, &provider.get(*b), cache);
+                            let dist_a = self.get_dist(&embed, &provider.get(*a), cache, info);
+                            let dist_b = self.get_dist(&embed, &provider.get(*b), cache, info);
                             dist_a.cmp(&dist_b)
                         })
                         .unwrap();
@@ -388,7 +439,7 @@ where
             }
             let new_cs: Vec<usize> = res
                 .iter()
-                .map(|(_, assignments)| self.centroid(assignments, cache))
+                .map(|(_, assignments)| self.centroid(assignments, cache, info))
                 .collect();
             if buff.par_iter().any(|old_cs| *old_cs == new_cs) {
                 // TODO use par for actually useful things
@@ -401,22 +452,26 @@ where
         }
     }
 
-    pub fn build(&mut self, max_node_size: Option<usize>, cache: &mut C) {
+    pub fn build<I>(&mut self, max_node_size: Option<usize>, cache: &mut C, info: &mut I)
+    where
+        I: Info,
+    {
         let mut all_ixs: Vec<usize> = self.provider.all().collect();
         let max_node_size = match max_node_size {
             Some(max_node_size) => max_node_size,
             None => all_ixs.len(),
         };
         self.high_ix = *all_ixs.iter().max().unwrap();
-        let root_ix = self.centroid(&all_ixs, cache);
+        let root_ix = self.centroid(&all_ixs, cache, info);
 
         fn remove(ixs: &mut Vec<usize>, index: usize) {
             ixs.retain(|&ix| ix != index);
         }
 
-        fn build_level<'a, E, D, C, T>(
+        fn build_level<'a, E, D, C, T, I>(
             tree: &Fann<'a, E, D, C, T>,
             cache: &mut C,
+            info: &mut I,
             cur_root_ix: usize,
             cur_all_ixs: Vec<usize>,
             max_node_size: usize,
@@ -425,6 +480,7 @@ where
             E: EmbeddingProvider<'a, D, T>,
             D: Distance<T> + Copy,
             C: Cache,
+            I: Info,
             T: 'a,
         {
             let mut node: Node<'a, E, D, C, T> = Node::new(cur_root_ix);
@@ -437,16 +493,16 @@ where
                 cur_all_ixs.iter().for_each(|&ix| {
                     let mut cnode: Node<'a, E, D, C, T> = Node::new(ix);
                     cnode.compute_radius();
-                    node.add_child(cnode, tree.provider, cache);
+                    node.add_child(cnode, tree.provider, cache, info);
                 });
             } else {
-                tree.kmedoid(cur_all_ixs, num_k, cache)
+                tree.kmedoid(cur_all_ixs, num_k, cache, info)
                     .into_iter()
                     .for_each(|(centroid_ix, mut assignments)| {
                         remove(&mut assignments, centroid_ix);
                         let child_node =
-                            build_level(tree, cache, centroid_ix, assignments, max_node_size);
-                        node.add_child(child_node, tree.provider, cache);
+                            build_level(tree, cache, info, centroid_ix, assignments, max_node_size);
+                        node.add_child(child_node, tree.provider, cache, info);
                     });
             }
             node.compute_radius();
@@ -454,13 +510,48 @@ where
         }
 
         remove(&mut all_ixs, root_ix);
-        self.root = Some(build_level(self, cache, root_ix, all_ixs, max_node_size));
+        self.root = Some(build_level(
+            self,
+            cache,
+            info,
+            root_ix,
+            all_ixs,
+            max_node_size,
+        ));
     }
 
-    pub fn draw(&self, prune: bool, radius: bool) -> String {
+    pub fn draw<I>(
+        &self,
+        info: Option<&I>,
+        res: Option<Vec<(usize, f64)>>,
+        prune: bool,
+        radius: bool,
+    ) -> String
+    where
+        I: Info,
+    {
         let pad = format!("{high_ix}", high_ix = self.high_ix).len();
-        let show_ixs: HashMap<usize, bool> = HashMap::new();
-        let stats: HashMap<usize, &str> = HashMap::new();
+        let show_ixs: HashMap<usize, bool> = {
+            let mut show_ixs = HashMap::new();
+            if let Some(info) = info {
+                info.dist_vec().iter().for_each(|ix| {
+                    show_ixs.insert(*ix, false);
+                });
+            }
+            if let Some(res) = res {
+                res.iter().for_each(|(ix, _)| {
+                    show_ixs.insert(*ix, true);
+                });
+            }
+            show_ixs
+        };
+        let stats: HashMap<usize, &str> = {
+            let mut stats = HashMap::new();
+            if let Some(info) = info {
+                stats.extend(info.scan_map());
+            }
+            stats
+        };
         self.root
             .as_ref()
             .unwrap()
@@ -476,12 +567,21 @@ where
     C: Cache,
     T: 'a,
 {
-    fn get_closest(&self, embed: &Embedding<T>, count: usize, cache: &mut C) -> Vec<(usize, f64)> {
+    fn get_closest<I>(
+        &self,
+        embed: &Embedding<T>,
+        count: usize,
+        cache: &mut C,
+        info: &mut I,
+    ) -> Vec<(usize, f64)>
+    where
+        I: Info,
+    {
         let mut res: Vec<(usize, DistanceCmp)> = Vec::with_capacity(count + 1);
         self.root
             .as_ref()
             .unwrap()
-            .get_closest(&mut res, embed, count, self.provider, cache);
+            .get_closest(&mut res, embed, count, self.provider, cache, info);
         let distance = self.provider.distance();
         res.iter()
             .map(|(ix, v)| (*ix, distance.finalize_distance(v)))

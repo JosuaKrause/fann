@@ -1,5 +1,6 @@
 use clap::{arg, Parser};
 use fann::distances::vec::{VecProvider, VEC_DOT_DISTANCE};
+use fann::info::{no_info, BaseInfo, Info};
 use std::time::Instant;
 
 use fann::cache::{no_cache, DistanceCache};
@@ -37,6 +38,7 @@ fn main() {
     let df = load_embed(args.file.as_str());
     println!("load took {:?}", t_load.elapsed());
     println!("{shape:?}", shape = df.shape());
+    let mut info = BaseInfo::new(total_size);
 
     let provider = NdProvider::new(df.slice(s![0..total_size, ..]), ND_DOT_DISTANCE);
     let vv = to_vec_vec(df.slice(s![0..total_size, ..]));
@@ -47,21 +49,39 @@ fn main() {
 
     let mut fann = Fann::new(&provider);
     let t_build = Instant::now();
-    fann.build(None, &mut cache);
+    fann.build(None, &mut cache, &mut info);
     println!("build took {:?}", t_build.elapsed());
-
-    // println!("{draw}", draw = fann.draw(false, false));
+    let (hits, miss) = info.cache_hits_miss();
+    println!(
+        "cache[rate: {:.2} hits: {} miss: {}]",
+        info.cache_hit_rate(),
+        hits,
+        miss
+    );
+    info.clear();
 
     let embed_v = df.row(total_size);
     let embed = Embedding::as_embedding(embed_v);
 
     let t_search = Instant::now();
-    let closest = fann.get_closest(&embed, 10, &mut cache);
+    let closest = fann.get_closest(&embed, 10, &mut cache, &mut info);
     println!("search took {:?}", t_search.elapsed());
     println!("{:?}", closest);
 
+    let (hits, miss) = info.cache_hits_miss();
+    println!(
+        "cache[rate: {:.2} hits: {} miss: {}]",
+        info.cache_hit_rate(),
+        hits,
+        miss
+    );
+    println!(
+        "{draw}",
+        draw = fann.draw(Some(&info), Some(closest), true, false)
+    );
+
     let t_base_search = Instant::now();
-    let base_closest = provider.get_closest(&embed, 10, &mut no_cache());
+    let base_closest = provider.get_closest(&embed, 10, &mut no_cache(), &mut no_info());
     println!("baseline search took {:?}", t_base_search.elapsed());
     println!("{:?}", base_closest);
 
@@ -69,7 +89,7 @@ fn main() {
     let vv_embed = Embedding::as_embedding(&vv_embed_v);
 
     let t_vv_base_search = Instant::now();
-    let vv_base_closest = vv_provider.get_closest(&vv_embed, 10, &mut no_cache());
+    let vv_base_closest = vv_provider.get_closest(&vv_embed, 10, &mut no_cache(), &mut no_info());
     println!("vv baseline search took {:?}", t_vv_base_search.elapsed());
     println!("{:?}", vv_base_closest);
 }

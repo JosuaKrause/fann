@@ -1,3 +1,5 @@
+use crate::info::Info;
+
 #[derive(Debug, Clone, Copy)]
 pub struct DistanceCmp(f64);
 
@@ -101,19 +103,34 @@ pub trait Cache {
     fn get(&mut self, key: &Key) -> Option<DistanceCmp>;
     fn put(&mut self, key: Key, value: DistanceCmp);
 
-    fn cached_dist<T, F>(&mut self, a: &Embedding<T>, b: &Embedding<T>, dist: F) -> DistanceCmp
+    fn cached_dist<T, F, I>(
+        &mut self,
+        a: &Embedding<T>,
+        b: &Embedding<T>,
+        dist: F,
+        info: &mut I,
+    ) -> DistanceCmp
     where
         F: Fn(&Embedding<T>, &Embedding<T>) -> DistanceCmp,
+        I: Info,
     {
+        let mut compute = |a, b| {
+            info.log_cache_access(true);
+            dist(a, b)
+        };
+
         match (a.index, b.index) {
-            (None, _) => dist(a, b),
-            (_, None) => dist(a, b),
+            (None, _) => compute(a, b),
+            (_, None) => compute(a, b),
             (Some(index_a), Some(index_b)) => {
                 let key = Key::new(index_a, index_b);
                 match self.get(&key) {
-                    Some(res) => res,
+                    Some(res) => {
+                        info.log_cache_access(false);
+                        res
+                    }
                     None => {
-                        let res = dist(a, b);
+                        let res = compute(a, b);
                         self.put(Key::new(index_a, index_b), res);
                         res
                     }
@@ -122,16 +139,20 @@ pub trait Cache {
         }
     }
 
-    fn cached_distance<'a, D, T: 'a>(
+    fn cached_distance<'a, D, T: 'a, I>(
         &mut self,
         a: &Embedding<T>,
         b: &Embedding<T>,
         distance: D,
+        info: &mut I,
     ) -> DistanceCmp
     where
         D: Distance<T> + Copy,
+        I: Info,
     {
-        self.cached_dist(&a, &b, |a, b| distance.distance_cmp(a, b))
+        info.log_dist(&a.index);
+        info.log_dist(&b.index);
+        self.cached_dist(&a, &b, |a, b| distance.distance_cmp(a, b), info)
     }
 }
 
@@ -139,5 +160,13 @@ pub trait NearestNeighbors<C, T>
 where
     C: Cache,
 {
-    fn get_closest(&self, embed: &Embedding<T>, count: usize, cache: &mut C) -> Vec<(usize, f64)>;
+    fn get_closest<I>(
+        &self,
+        embed: &Embedding<T>,
+        count: usize,
+        cache: &mut C,
+        info: &mut I,
+    ) -> Vec<(usize, f64)>
+    where
+        I: Info;
 }
