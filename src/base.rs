@@ -43,47 +43,42 @@ impl Ord for DistanceCmp {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Embedding<T>
-where
-    T: Copy,
-{
+pub struct Embedding<T> {
     pub value: T,
     pub index: Option<usize>,
 }
 
-pub trait Distance<T>
-where
-    T: Copy,
-{
-    fn distance_cmp(&self, a: Embedding<T>, b: Embedding<T>) -> DistanceCmp;
-    fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64;
-}
-
-pub trait EmbeddingProvider<'a, D, T>
-where
-    D: Distance<T>,
-    T: Copy,
-{
-    fn get_embed(&'a self, index: usize) -> T;
-    fn all(&self) -> std::ops::Range<usize>;
-    fn distance(&self) -> &D;
-
-    fn get(&'a self, index: usize) -> Embedding<T> {
-        self.wrap(self.get_embed(index), index)
-    }
-
-    fn wrap(&'a self, embed: T, index: usize) -> Embedding<T> {
+impl<T> Embedding<T> {
+    pub fn wrap(embed: T, index: usize) -> Embedding<T> {
         Embedding {
             value: embed,
             index: Some(index),
         }
     }
 
-    fn as_embedding(&self, embed: T) -> Embedding<T> {
+    pub fn as_embedding(embed: T) -> Embedding<T> {
         Embedding {
             value: embed,
             index: None,
         }
+    }
+}
+
+pub trait Distance<T> {
+    fn distance_cmp(&self, a: &Embedding<T>, b: &Embedding<T>) -> DistanceCmp;
+    fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64;
+}
+
+pub trait EmbeddingProvider<'a, D, T>
+where
+    D: Distance<T> + Copy,
+{
+    fn get_embed(&'a self, index: usize) -> T;
+    fn all(&self) -> std::ops::Range<usize>;
+    fn distance(&self) -> D;
+
+    fn get(&'a self, index: usize) -> Embedding<T> {
+        Embedding::wrap(self.get_embed(index), index)
     }
 }
 
@@ -109,7 +104,6 @@ pub trait Cache {
     fn cached_dist<T, F>(&mut self, a: &Embedding<T>, b: &Embedding<T>, dist: F) -> DistanceCmp
     where
         F: Fn(&Embedding<T>, &Embedding<T>) -> DistanceCmp,
-        T: Copy,
     {
         match (a.index, b.index) {
             (None, _) => dist(a, b),
@@ -130,21 +124,20 @@ pub trait Cache {
 
     fn cached_distance<'a, D, T: 'a>(
         &mut self,
-        a: Embedding<T>,
-        b: Embedding<T>,
-        distance: &'a D,
+        a: &Embedding<T>,
+        b: &Embedding<T>,
+        distance: D,
     ) -> DistanceCmp
     where
-        D: Distance<T>,
-        T: Copy,
+        D: Distance<T> + Copy,
     {
-        self.cached_dist(&a, &b, |a, b| distance.distance_cmp(*a, *b))
+        self.cached_dist(&a, &b, |a, b| distance.distance_cmp(a, b))
     }
 }
 
-pub trait NearestNeighbors<T>
+pub trait NearestNeighbors<C, T>
 where
-    T: Copy,
+    C: Cache,
 {
-    fn get_closest(&mut self, embed: Embedding<T>, count: usize) -> Vec<(usize, f64)>;
+    fn get_closest(&self, embed: &Embedding<T>, count: usize, cache: &mut C) -> Vec<(usize, f64)>;
 }

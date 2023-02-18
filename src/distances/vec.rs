@@ -1,11 +1,14 @@
-use crate::{Distance, DistanceCmp, Embedding, EmbeddingProvider};
+use crate::{
+    cache::NoCache, Distance, DistanceCmp, Embedding, EmbeddingProvider, NearestNeighbors,
+};
 
+#[derive(Debug, Clone, Copy)]
 pub struct VecDotDistance {}
 
 pub const VEC_DOT_DISTANCE: VecDotDistance = VecDotDistance {};
 
 impl Distance<&Vec<f64>> for VecDotDistance {
-    fn distance_cmp(&self, a: Embedding<&Vec<f64>>, b: Embedding<&Vec<f64>>) -> DistanceCmp {
+    fn distance_cmp(&self, a: &Embedding<&Vec<f64>>, b: &Embedding<&Vec<f64>>) -> DistanceCmp {
         let res: f64 = a
             .value
             .iter()
@@ -20,12 +23,13 @@ impl Distance<&Vec<f64>> for VecDotDistance {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct VecL2Distance {}
 
 pub const VEC_L2_DISTANCE: VecL2Distance = VecL2Distance {};
 
 impl Distance<&Vec<f64>> for VecL2Distance {
-    fn distance_cmp(&self, a: Embedding<&Vec<f64>>, b: Embedding<&Vec<f64>>) -> DistanceCmp {
+    fn distance_cmp(&self, a: &Embedding<&Vec<f64>>, b: &Embedding<&Vec<f64>>) -> DistanceCmp {
         let res: f64 = a
             .value
             .iter()
@@ -44,15 +48,15 @@ pub struct VecProvider<'a, D>
 where
     D: Distance<&'a Vec<f64>>,
 {
-    embeddings: Vec<Vec<f64>>,
-    distance: &'a D,
+    embeddings: &'a Vec<Vec<f64>>,
+    distance: D,
 }
 
 impl<'a, D> VecProvider<'a, D>
 where
     D: Distance<&'a Vec<f64>>,
 {
-    pub fn new(embeddings: Vec<Vec<f64>>, distance: &'a D) -> Self {
+    pub fn new(embeddings: &'a Vec<Vec<f64>>, distance: D) -> Self {
         VecProvider {
             embeddings,
             distance,
@@ -62,7 +66,7 @@ where
 
 impl<'a, D> EmbeddingProvider<'a, D, &'a Vec<f64>> for VecProvider<'a, D>
 where
-    D: Distance<&'a Vec<f64>>,
+    D: Distance<&'a Vec<f64>> + Copy,
 {
     fn get_embed(&'a self, index: usize) -> &'a Vec<f64> {
         &self.embeddings[index]
@@ -72,27 +76,35 @@ where
         0..self.embeddings.len()
     }
 
-    fn distance(&self) -> &'a D {
+    fn distance(&self) -> D {
         self.distance
     }
 }
 
-// impl<'a, D> NearestNeighbors<&Vec<f64>> for VecProvider<'a, D>
-// where
-//     D: Distance<&'a Vec<f64>>,
-// {
-//     fn get_closest(&mut self, embed: Embedding<&Vec<f64>>, count: usize) -> Vec<(usize, f64)> {
-//         let distance = self.distance;
-//         let dists: Vec<DistanceCmp> = self
-//             .all()
-//             .map(|ix| distance.distance_cmp(self.get(ix), embed))
-//             .collect();
-//         let mut indices: Vec<usize> = (0..dists.len()).collect();
-//         indices.sort_unstable();
-//         indices
-//             .iter()
-//             .take(count)
-//             .map(|&ix| (ix, distance.finalize_distance(&dists[ix])))
-//             .collect()
-//     }
-// }
+impl<'a, D> NearestNeighbors<NoCache, &'a Vec<f64>> for VecProvider<'a, D>
+where
+    D: Distance<&'a Vec<f64>>,
+{
+    fn get_closest(
+        &self,
+        embed: &Embedding<&'a Vec<f64>>,
+        count: usize,
+        _cache: &mut NoCache,
+    ) -> Vec<(usize, f64)> {
+        let mut dists: Vec<(usize, DistanceCmp)> = self
+            .embeddings
+            .iter()
+            .enumerate()
+            .map(|(ix, cur)| {
+                let val = Embedding::wrap(cur, ix);
+                (ix, self.distance.distance_cmp(&val, embed))
+            })
+            .collect();
+        dists.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
+        dists
+            .iter()
+            .take(count)
+            .map(|(ix, dist)| (*ix, self.distance.finalize_distance(dist)))
+            .collect()
+    }
+}

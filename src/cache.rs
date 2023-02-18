@@ -25,7 +25,12 @@ impl Cache for DistanceCache {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct NoCache {}
+
+pub fn no_cache() -> NoCache {
+    NoCache {}
+}
 
 impl Cache for NoCache {
     fn get(&mut self, _key: &Key) -> Option<DistanceCmp> {
