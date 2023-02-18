@@ -53,10 +53,11 @@ fn main() {
     println!("build took {:?}", t_build.elapsed());
     let (hits, miss) = info.cache_hits_miss();
     println!(
-        "cache[rate: {:.2} hits: {} miss: {}]",
+        "cache[rate: {:.2} hits: {} miss: {} total: {}]",
         info.cache_hit_rate(),
         hits,
-        miss
+        miss,
+        hits + miss,
     );
     info.clear();
 
@@ -70,10 +71,11 @@ fn main() {
 
     let (hits, miss) = info.cache_hits_miss();
     println!(
-        "cache[rate: {:.2} hits: {} miss: {}]",
+        "cache[rate: {:.2} hits: {} miss: {} total: {}]",
         info.cache_hit_rate(),
         hits,
-        miss
+        miss,
+        hits + miss,
     );
     println!(
         "{draw}",
