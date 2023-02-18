@@ -1,10 +1,10 @@
 use std::num::NonZeroUsize;
 
-use crate::{Cache, Key};
+use crate::{Cache, DistanceCmp, Key};
 use lru::LruCache;
 
 pub struct DistanceCache {
-    lru: LruCache<Key, f64>,
+    lru: LruCache<Key, DistanceCmp>,
 }
 
 impl DistanceCache {
@@ -16,11 +16,11 @@ impl DistanceCache {
 }
 
 impl Cache for DistanceCache {
-    fn get(&mut self, key: &Key) -> Option<f64> {
+    fn get(&mut self, key: &Key) -> Option<DistanceCmp> {
         self.lru.get(key).map(|&res| res)
     }
 
-    fn put(&mut self, key: Key, value: f64) {
+    fn put(&mut self, key: Key, value: DistanceCmp) {
         self.lru.put(key, value);
     }
 }
@@ -28,9 +28,9 @@ impl Cache for DistanceCache {
 pub struct NoCache {}
 
 impl Cache for NoCache {
-    fn get(&mut self, _key: &Key) -> Option<f64> {
+    fn get(&mut self, _key: &Key) -> Option<DistanceCmp> {
         None
     }
 
-    fn put(&mut self, _key: Key, _value: f64) {}
+    fn put(&mut self, _key: Key, _value: DistanceCmp) {}
 }

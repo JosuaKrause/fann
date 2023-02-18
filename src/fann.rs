@@ -5,109 +5,62 @@ use std::{
     marker::PhantomData,
 };
 
+use crate::{Cache, Distance, DistanceCmp, Embedding, EmbeddingProvider, NearestNeighbors};
+
 const HIGHLIGHT_A: &str = "*";
 const HIGHLIGHT_B: &str = ":";
 const NO_HIGHLIGHT: &str = "";
 
-#[derive(Debug, Clone, Copy)]
-pub struct Embedding<T> {
-    pub value: T,
-    pub index: Option<usize>,
-}
-
-pub trait Distance<'a, T: 'a> {
-    fn distance(&self, a: &Embedding<T>, b: &Embedding<T>) -> f64;
-    fn get(&'a self, index: usize) -> T;
-    fn all(&self) -> std::ops::Range<usize>;
-}
-
-#[derive(Hash, Eq, PartialEq, Debug)]
-pub struct Key {
-    lower_index: usize,
-    upper_index: usize,
-}
-
-impl Key {
-    pub fn new(index_a: usize, index_b: usize) -> Self {
-        Key {
-            lower_index: index_a.min(index_b),
-            upper_index: index_a.max(index_b),
-        }
-    }
-}
-
-pub trait Cache {
-    fn get(&mut self, key: &Key) -> Option<f64>;
-    fn put(&mut self, key: Key, value: f64);
-}
-
-fn cached_dist<T, F, C>(a: &Embedding<T>, b: &Embedding<T>, cache: &mut C, dist: F) -> f64
+struct Child<'a, E, D, C, T>
 where
+    E: EmbeddingProvider<'a, D, T>,
+    D: Distance<T>,
     C: Cache,
-    F: Fn(&Embedding<T>, &Embedding<T>) -> f64,
+    T: 'a + Copy,
 {
-    match (a.index, b.index) {
-        (None, _) => dist(a, b),
-        (_, None) => dist(a, b),
-        (Some(index_a), Some(index_b)) => {
-            let key = Key::new(index_a, index_b);
-            match cache.get(&key) {
-                Some(res) => res,
-                None => {
-                    let res = dist(a, b);
-                    cache.put(Key::new(index_a, index_b), res);
-                    res
-                }
-            }
-        }
-    }
+    node: Node<'a, E, D, C, T>,
+    center_dist: DistanceCmp,
 }
 
-struct Child<'a, D, C, T: 'a>
+struct Node<'a, E, D, C, T>
 where
-    D: Distance<'a, T>,
+    E: EmbeddingProvider<'a, D, T>,
+    D: Distance<T>,
     C: Cache,
-{
-    node: Node<'a, D, C, T>,
-    center_dist: f64,
-}
-
-struct Node<'a, D, C, T: 'a>
-where
-    D: Distance<'a, T>,
-    C: Cache,
+    T: 'a + Copy,
 {
     centroid_index: usize,
-    radius: f64,
+    radius: DistanceCmp,
     count: usize,
-    children: Vec<Child<'a, D, C, T>>,
-    distance_type: PhantomData<&'a D>,
-    embed_type: PhantomData<T>,
+    children: Vec<Child<'a, E, D, C, T>>,
+    provider_type: PhantomData<&'a E>,
+    distance_type: PhantomData<D>,
     cache_type: PhantomData<C>,
+    embed_type: PhantomData<T>,
 }
 
-impl<'a, D, C, T: 'a> Node<'a, D, C, T>
+impl<'a, E, D, C, T> Node<'a, E, D, C, T>
 where
-    D: Distance<'a, T>,
+    E: EmbeddingProvider<'a, D, T>,
+    D: Distance<T>,
     C: Cache,
+    T: 'a + Copy,
 {
     fn new(centroid_index: usize) -> Self {
         Node {
             centroid_index,
-            radius: 0.0,
+            radius: DistanceCmp::zero(),
             count: 1,
             children: Vec::new(),
+            provider_type: PhantomData,
             distance_type: PhantomData,
-            embed_type: PhantomData,
             cache_type: PhantomData,
+            embed_type: PhantomData,
         }
     }
 
-    fn get_embed(&self, distance: &'a D) -> Embedding<T> {
-        Embedding {
-            value: distance.get(self.centroid_index),
-            index: Some(self.centroid_index),
-        }
+    fn get_embed(&self, provider: &'a E) -> Embedding<T> {
+        provider.get(self.centroid_index)
     }
 
     fn count_descendants(&self) -> usize {
@@ -118,18 +71,22 @@ where
         self.children.len()
     }
 
-    fn get_dist(&self, embed: &Embedding<T>, distance: &'a D, cache: &mut C) -> f64 {
-        cached_dist(&self.get_embed(distance), embed, cache, |a, b| {
-            distance.distance(a, b)
-        })
+    fn get_dist(&self, embed: Embedding<T>, provider: &'a E, cache: &mut C) -> DistanceCmp {
+        let distance = provider.distance();
+        cache.cached_distance(self.get_embed(provider), embed, distance)
     }
 
-    fn get_dist_min(&self, embed: &Embedding<T>, distance: &'a D, cache: &mut C) -> f64 {
-        f64::max(0.0, self.get_dist(embed, distance, cache) - self.radius)
+    fn get_dist_min(&self, embed: Embedding<T>, provider: &'a E, cache: &mut C) -> DistanceCmp {
+        let dist = self.get_dist(embed, provider, cache);
+        dist.combine(&self.radius, |d, radius| f64::max(0.0, d - radius))
     }
 
-    fn get_child_dist_max(child: &Child<'a, D, C, T>) -> f64 {
-        child.center_dist + child.node.radius
+    fn get_child_dist_max(child: &Child<'a, E, D, C, T>) -> DistanceCmp {
+        child
+            .center_dist
+            .combine(&child.node.radius, |center_dist, radius| {
+                center_dist + radius
+            })
     }
 
     fn compute_radius(&mut self) {
@@ -137,47 +94,49 @@ where
             .children
             .iter()
             .map(|child| Node::get_child_dist_max(child))
-            .max_by(|a, b| a.total_cmp(b))
-            .unwrap_or(0.0);
+            .max()
+            .unwrap_or(DistanceCmp::zero());
     }
 
-    fn add_child(&mut self, child: Node<'a, D, C, T>, distance: &'a D, cache: &mut C) {
-        let center_dist = self.get_dist(&child.get_embed(distance), distance, cache);
+    fn add_child(&mut self, child: Node<'a, E, D, C, T>, provider: &'a E, cache: &mut C) {
+        let center_dist = self.get_dist(child.get_embed(provider), provider, cache);
         self.count += child.count_descendants();
         self.children.push(Child {
             node: child,
             center_dist,
         });
         self.children
-            .sort_unstable_by(|a, b| a.center_dist.total_cmp(&b.center_dist).reverse());
+            .sort_unstable_by(|a, b| a.center_dist.cmp(&b.center_dist).reverse());
     }
 
     fn get_closest<'t>(
         &'t self,
-        res: &mut Vec<(usize, f64)>,
-        embed: &Embedding<T>,
+        res: &mut Vec<(usize, DistanceCmp)>,
+        embed: Embedding<T>,
         count: usize,
-        distance: &'a D,
+        provider: &'a E,
         cache: &mut C,
     ) {
-        let own_dist = self.get_dist(embed, distance, cache);
+        let own_dist = self.get_dist(embed, provider, cache);
 
-        fn max_dist(res: &Vec<(usize, f64)>, count: usize) -> f64 {
+        fn max_dist(res: &Vec<(usize, DistanceCmp)>, count: usize) -> DistanceCmp {
             let index = count.min(res.len()) - 1;
-            res.get(index).unwrap().1
+            res[index].1
         }
 
-        fn add_node<'a, D, C, T: 'a>(
-            res: &mut Vec<(usize, f64)>,
-            node: &Node<'a, D, C, T>,
-            distance: f64,
+        fn add_node<'a, E, D, C, T>(
+            res: &mut Vec<(usize, DistanceCmp)>,
+            node: &Node<'a, E, D, C, T>,
+            distance: DistanceCmp,
             count: usize,
         ) where
-            D: Distance<'a, T>,
+            E: EmbeddingProvider<'a, D, T>,
+            D: Distance<T>,
             C: Cache,
+            T: 'a + Copy,
         {
             let element = (node.centroid_index, distance);
-            let mindex = res.binary_search_by(|&(_, dist)| dist.total_cmp(&distance));
+            let mindex = res.binary_search_by(|&(_, dist)| dist.cmp(&distance));
             match mindex {
                 Ok(index) => res.insert(index, element),
                 Err(index) => res.insert(index, element),
@@ -190,23 +149,25 @@ where
         }
         if self.radius < own_dist {
             for child in self.children.iter() {
-                if max_dist(res, count) < own_dist - child.center_dist {
+                if max_dist(res, count)
+                    < own_dist.combine(&child.center_dist, |own, center| own - center)
+                {
                     continue;
                 }
-                child.node.get_closest(res, embed, count, distance, cache);
+                child.node.get_closest(res, embed, count, provider, cache);
             }
         } else {
-            let mut inners: Vec<(&Node<D, C, T>, f64)> = self
+            let mut inners: Vec<(&Node<E, D, C, T>, DistanceCmp)> = self
                 .children
                 .iter()
-                .map(|child| (&child.node, child.node.get_dist_min(embed, distance, cache)))
-                .collect::<Vec<(&Node<D, C, T>, f64)>>();
-            inners.sort_unstable_by(|(_, dist_a), (_, dist_b)| dist_a.total_cmp(dist_b));
+                .map(|child| (&child.node, child.node.get_dist_min(embed, provider, cache)))
+                .collect::<Vec<(&Node<E, D, C, T>, DistanceCmp)>>();
+            inners.sort_unstable_by(|(_, dist_a), (_, dist_b)| dist_a.cmp(dist_b));
             for (cnode, cmin) in inners.iter() {
                 if max_dist(res, count) < *cmin {
                     continue;
                 }
-                cnode.get_closest(res, embed, count, distance, cache);
+                cnode.get_closest(res, embed, count, provider, cache);
             }
         }
     }
@@ -230,7 +191,7 @@ where
             pad = pad - highlight.len(),
         );
         let rad = if radius {
-            format!("[r:{r}]", r = self.radius)
+            format!("[r:{r}]", r = self.radius.to())
         } else {
             "".to_owned()
         };
@@ -319,69 +280,63 @@ where
     }
 }
 
-pub struct Fann<'a, D, C, T: 'a>
+pub struct Fann<'a, E, D, C, T>
 where
-    D: Distance<'a, T>,
+    E: EmbeddingProvider<'a, D, T>,
+    D: Distance<T>,
     C: Cache,
+    T: 'a + Copy,
 {
-    distance: &'a D,
+    provider: &'a E,
     cache: &'a mut C,
-    root: Option<Node<'a, D, C, T>>,
+    root: Option<Node<'a, E, D, C, T>>,
     high_ix: usize,
 }
 
-impl<'a, D, C, T: 'a> Fann<'a, D, C, T>
+impl<'a, E, D, C, T> Fann<'a, E, D, C, T>
 where
-    D: Distance<'a, T>,
+    E: EmbeddingProvider<'a, D, T>,
+    D: Distance<T>,
     C: Cache,
+    T: 'a + Copy,
 {
-    pub fn new(distance: &'a D, cache: &'a mut C) -> Self {
+    pub fn new(provider: &'a E, cache: &'a mut C) -> Self {
         Fann {
-            distance,
+            provider,
             cache,
             root: None,
             high_ix: 0,
         }
     }
 
-    pub fn as_embedding(&self, embed: T) -> Embedding<T> {
-        Embedding {
-            value: embed,
-            index: None,
-        }
-    }
-
-    fn get_embed(&self, index: usize) -> Embedding<T> {
-        Embedding {
-            value: self.distance.get(index),
-            index: Some(index),
-        }
-    }
-
-    fn get_dist(&mut self, embed_a: &Embedding<T>, embed_b: &Embedding<T>) -> f64 {
-        cached_dist(embed_a, embed_b, self.cache, |a, b| {
-            self.distance.distance(a, b)
-        })
+    fn get_dist(&mut self, embed_a: Embedding<T>, embed_b: Embedding<T>) -> DistanceCmp {
+        self.cache
+            .cached_distance(embed_a, embed_b, self.provider.distance())
     }
 
     fn centroid(&mut self, all_ixs: &Vec<usize>) -> usize {
-        let (res_ix, _) = all_ixs.iter().fold((None, f64::INFINITY), |best, &ix| {
-            let (best_ix, best_dist) = best;
-            let embed = self.get_embed(ix);
-            let cur_dist: f64 = all_ixs.iter().fold(0.0, |res, &oix| {
-                if oix == ix || res > best_dist {
-                    res
-                } else {
-                    let oembed = self.get_embed(oix);
-                    res + self.get_dist(&embed, &oembed)
-                }
-            });
-            if best_ix.is_none() || cur_dist < best_dist {
-                (Some(ix), cur_dist)
-            } else {
-                best
-            }
-        });
+        let provider = self.provider;
+        let (res_ix, _) =
+            all_ixs
+                .iter()
+                .fold((None, DistanceCmp::of(f64::INFINITY)), |best, &ix| {
+                    let (best_ix, best_dist) = best;
+                    let embed = provider.get(ix);
+                    let cur_dist: DistanceCmp =
+                        all_ixs.iter().fold(DistanceCmp::zero(), |res, &oix| {
+                            if oix == ix || res > best_dist {
+                                res
+                            } else {
+                                let oembed = provider.get(oix);
+                                res.combine(&self.get_dist(embed, oembed), |cur, dist| cur + dist)
+                            }
+                        });
+                    if best_ix.is_none() || cur_dist < best_dist {
+                        (Some(ix), cur_dist)
+                    } else {
+                        best
+                    }
+                });
         res_ix.unwrap()
     }
 
@@ -389,6 +344,7 @@ where
         if all_ixs.len() <= k_num {
             return all_ixs.iter().map(|&ix| (ix, Vec::new())).collect();
         }
+        let provider = self.provider;
         let buff_size = 10;
         let mut rounds = 1000;
         let mut buff: VecDeque<Vec<usize>> = VecDeque::with_capacity(buff_size);
@@ -402,13 +358,13 @@ where
                 .iter()
                 .filter(|&ix| !centroids.contains(ix))
                 .for_each(|&ix| {
-                    let embed = self.get_embed(ix);
+                    let embed = provider.get(ix);
                     let (_, best) = res
                         .iter_mut()
                         .min_by(|(a, _), (b, _)| {
-                            let dist_a = self.get_dist(&embed, &self.get_embed(*a));
-                            let dist_b = self.get_dist(&embed, &self.get_embed(*b));
-                            dist_a.total_cmp(&dist_b)
+                            let dist_a = self.get_dist(embed, provider.get(*a));
+                            let dist_b = self.get_dist(embed, provider.get(*b));
+                            dist_a.cmp(&dist_b)
                         })
                         .unwrap();
                     best.push(ix);
@@ -437,7 +393,7 @@ where
     }
 
     pub fn build(&mut self, max_node_size: Option<usize>) {
-        let mut all_ixs: Vec<usize> = self.distance.all().collect();
+        let mut all_ixs: Vec<usize> = self.provider.all().collect();
         let max_node_size = match max_node_size {
             Some(max_node_size) => max_node_size,
             None => all_ixs.len(),
@@ -449,13 +405,19 @@ where
             ixs.retain(|&ix| ix != index);
         }
 
-        fn build_level<'a, D: Distance<'a, T>, C: Cache, T>(
-            tree: &mut Fann<'a, D, C, T>,
+        fn build_level<'a, E, D, C, T>(
+            tree: &mut Fann<'a, E, D, C, T>,
             cur_root_ix: usize,
             cur_all_ixs: Vec<usize>,
             max_node_size: usize,
-        ) -> Node<'a, D, C, T> {
-            let mut node: Node<'a, D, C, T> = Node::new(cur_root_ix);
+        ) -> Node<'a, E, D, C, T>
+        where
+            E: EmbeddingProvider<'a, D, T>,
+            D: Distance<T>,
+            C: Cache,
+            T: 'a + Copy,
+        {
+            let mut node: Node<'a, E, D, C, T> = Node::new(cur_root_ix);
             let num_k = if max_node_size * max_node_size > cur_all_ixs.len() {
                 ((cur_all_ixs.len() as f64).sqrt() as usize).max(1)
             } else {
@@ -463,16 +425,16 @@ where
             };
             if num_k == 1 || cur_all_ixs.len() <= num_k {
                 cur_all_ixs.iter().for_each(|&ix| {
-                    let mut cnode: Node<'a, D, C, T> = Node::new(ix);
+                    let mut cnode: Node<'a, E, D, C, T> = Node::new(ix);
                     cnode.compute_radius();
-                    node.add_child(cnode, tree.distance, tree.cache);
+                    node.add_child(cnode, tree.provider, tree.cache);
                 });
             } else {
                 tree.kmedoid(cur_all_ixs, num_k).into_iter().for_each(
                     |(centroid_ix, mut assignments)| {
                         remove(&mut assignments, centroid_ix);
                         let child_node = build_level(tree, centroid_ix, assignments, max_node_size);
-                        node.add_child(child_node, tree.distance, tree.cache);
+                        node.add_child(child_node, tree.provider, tree.cache);
                     },
                 );
             }
@@ -484,15 +446,6 @@ where
         self.root = Some(build_level(self, root_ix, all_ixs, max_node_size));
     }
 
-    pub fn get_closest(&mut self, embed: &Embedding<T>, count: usize) -> Vec<(usize, f64)> {
-        let mut res: Vec<(usize, f64)> = Vec::with_capacity(count + 1);
-        self.root
-            .as_ref()
-            .unwrap()
-            .get_closest(&mut res, embed, count, self.distance, self.cache);
-        res
-    }
-
     pub fn draw(&self, prune: bool, radius: bool) -> String {
         let pad = format!("{high_ix}", high_ix = self.high_ix).len();
         let show_ixs: HashMap<usize, bool> = HashMap::new();
@@ -502,5 +455,25 @@ where
             .unwrap()
             .draw(pad, &show_ixs, &stats, prune, radius)
             .join("\n")
+    }
+}
+
+impl<'a, E, D, C, T> NearestNeighbors<T> for Fann<'a, E, D, C, T>
+where
+    E: EmbeddingProvider<'a, D, T>,
+    D: Distance<T>,
+    C: Cache,
+    T: 'a + Copy,
+{
+    fn get_closest(&mut self, embed: Embedding<T>, count: usize) -> Vec<(usize, f64)> {
+        let mut res: Vec<(usize, DistanceCmp)> = Vec::with_capacity(count + 1);
+        self.root
+            .as_ref()
+            .unwrap()
+            .get_closest(&mut res, embed, count, self.provider, self.cache);
+        let distance = self.provider.distance();
+        res.iter()
+            .map(|(ix, v)| (*ix, distance.finalize_distance(v)))
+            .collect()
     }
 }
