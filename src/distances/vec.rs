@@ -12,9 +12,9 @@ pub const VEC_DOT_DISTANCE: VecDotDistance = VecDotDistance {};
 impl Distance<&Vec<f64>> for VecDotDistance {
     fn distance_cmp(&self, a: &Embedding<&Vec<f64>>, b: &Embedding<&Vec<f64>>) -> DistanceCmp {
         let res: f64 = a
-            .value
+            .embed
             .iter()
-            .zip(b.value.iter())
+            .zip(b.embed.iter())
             .map(|(&cur_a, &cur_b)| cur_a * cur_b)
             .sum();
         DistanceCmp::of((-res).exp())
@@ -33,9 +33,9 @@ pub const VEC_L2_DISTANCE: VecL2Distance = VecL2Distance {};
 impl Distance<&Vec<f64>> for VecL2Distance {
     fn distance_cmp(&self, a: &Embedding<&Vec<f64>>, b: &Embedding<&Vec<f64>>) -> DistanceCmp {
         let res: f64 = a
-            .value
+            .embed
             .iter()
-            .zip(b.value.iter())
+            .zip(b.embed.iter())
             .map(|(&cur_a, &cur_b)| (cur_a - cur_b) * (cur_a - cur_b))
             .sum();
         DistanceCmp::of(res)
@@ -91,7 +91,7 @@ where
 {
     fn get_closest<I>(
         &self,
-        embed: &Embedding<&'a Vec<f64>>,
+        other: &Embedding<&'a Vec<f64>>,
         count: usize,
         _cache_factory: &NoLocalCacheFactory,
         _info: &mut I,
@@ -105,7 +105,7 @@ where
             .enumerate()
             .map(|(ix, cur)| {
                 let val = Embedding::wrap(cur, ix);
-                (ix, self.distance.distance_cmp(&val, embed))
+                (ix, self.distance.distance_cmp(&val, other))
             })
             .collect();
         dists.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));

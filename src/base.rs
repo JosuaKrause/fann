@@ -46,23 +46,20 @@ impl Ord for DistanceCmp {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Embedding<T> {
-    pub value: T,
+    pub embed: T,
     pub index: Option<usize>,
 }
 
 impl<T> Embedding<T> {
     pub fn wrap(embed: T, index: usize) -> Embedding<T> {
         Embedding {
-            value: embed,
+            embed,
             index: Some(index),
         }
     }
 
     pub fn as_embedding(embed: T) -> Embedding<T> {
-        Embedding {
-            value: embed,
-            index: None,
-        }
+        Embedding { embed, index: None }
     }
 }
 
@@ -139,7 +136,7 @@ pub trait Cache {
         }
     }
 
-    fn cached_distance<'a, D, T: 'a, I>(
+    fn cached_distance<'a, D, T, I>(
         &mut self,
         a: &Embedding<T>,
         b: &Embedding<T>,
@@ -148,6 +145,7 @@ pub trait Cache {
     ) -> DistanceCmp
     where
         D: Distance<T> + Copy,
+        T: 'a,
         I: Info,
     {
         info.log_dist(&a.index);
@@ -156,9 +154,10 @@ pub trait Cache {
     }
 }
 
-pub trait LocalCache<'a, D, T: 'a>
+pub trait LocalCache<'a, D, T>
 where
     D: Distance<T>,
+    T: 'a,
 {
     fn get(&mut self, index: usize) -> Option<DistanceCmp>;
     fn put(&mut self, index: usize, value: DistanceCmp);
@@ -190,23 +189,25 @@ where
     }
 }
 
-pub trait LocalCacheFactory<'a, D, L, T: 'a>
+pub trait LocalCacheFactory<'a, D, L, T>
 where
     D: Distance<T>,
     L: LocalCache<'a, D, T>,
+    T: 'a,
 {
     fn create(&self, embed: &'a Embedding<T>) -> L;
 }
 
-pub trait NearestNeighbors<'a, F, D, L, T: 'a>
+pub trait NearestNeighbors<'a, F, D, L, T>
 where
     F: LocalCacheFactory<'a, D, L, T>,
     D: Distance<T>,
     L: LocalCache<'a, D, T>,
+    T: 'a,
 {
     fn get_closest<I>(
         &self,
-        embed: &'a Embedding<T>,
+        other: &'a Embedding<T>,
         count: usize,
         cache_factory: &F,
         info: &mut I,

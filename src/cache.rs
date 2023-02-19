@@ -41,13 +41,17 @@ impl Cache for NoCache {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct NoLocalCache<'a, T: 'a> {
+pub struct NoLocalCache<'a, T>
+where
+    T: 'a,
+{
     embed: &'a Embedding<T>,
 }
 
-impl<'a, D, T: 'a> LocalCache<'a, D, T> for NoLocalCache<'a, T>
+impl<'a, D, T> LocalCache<'a, D, T> for NoLocalCache<'a, T>
 where
     D: Distance<T>,
+    T: 'a,
 {
     fn get(&mut self, _index: usize) -> Option<DistanceCmp> {
         None
@@ -67,23 +71,28 @@ pub fn no_local_cache() -> NoLocalCacheFactory {
     NoLocalCacheFactory {}
 }
 
-impl<'a, D, T: 'a> LocalCacheFactory<'a, D, NoLocalCache<'a, T>, T> for NoLocalCacheFactory
+impl<'a, D, T> LocalCacheFactory<'a, D, NoLocalCache<'a, T>, T> for NoLocalCacheFactory
 where
     D: Distance<T>,
+    T: 'a,
 {
     fn create(&self, embed: &'a Embedding<T>) -> NoLocalCache<'a, T> {
         NoLocalCache { embed }
     }
 }
 
-pub struct DistanceLocalCache<'a, T: 'a> {
+pub struct DistanceLocalCache<'a, T>
+where
+    T: 'a,
+{
     map: HashMap<usize, DistanceCmp>,
     embed: &'a Embedding<T>,
 }
 
-impl<'a, D, T: 'a> LocalCache<'a, D, T> for DistanceLocalCache<'a, T>
+impl<'a, D, T> LocalCache<'a, D, T> for DistanceLocalCache<'a, T>
 where
     D: Distance<T>,
+    T: 'a,
 {
     fn get(&mut self, index: usize) -> Option<DistanceCmp> {
         self.map.get(&index).map(|&res| res)
@@ -107,10 +116,10 @@ impl DistanceLocalCacheFactory {
     }
 }
 
-impl<'a, D, T: 'a> LocalCacheFactory<'a, D, DistanceLocalCache<'a, T>, T>
-    for DistanceLocalCacheFactory
+impl<'a, D, T> LocalCacheFactory<'a, D, DistanceLocalCache<'a, T>, T> for DistanceLocalCacheFactory
 where
     D: Distance<T>,
+    T: 'a,
 {
     fn create(&self, embed: &'a Embedding<T>) -> DistanceLocalCache<'a, T> {
         DistanceLocalCache {

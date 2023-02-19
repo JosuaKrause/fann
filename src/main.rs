@@ -3,7 +3,7 @@ use fann::distances::vec::{VecProvider, VEC_DOT_DISTANCE};
 use fann::info::{no_info, BaseInfo, Info};
 use std::time::Instant;
 
-use fann::cache::{no_local_cache, DistanceCache, DistanceLocalCacheFactory};
+use fann::cache::{no_local_cache, DistanceCache};
 use ndarray::{s, Array2, ArrayView2};
 use polars::io::prelude::*;
 use polars::prelude::Float64Type;
@@ -28,11 +28,15 @@ struct Args {
     file: String,
     #[arg(short, long, default_value_t = 1000)]
     total: usize,
+    #[arg(short, long)]
+    precluster: Option<usize>,
 }
 
 fn main() {
     let args = Args::parse();
     let total_size: usize = args.total;
+    let pre_cluster: Option<usize> = args.precluster;
+    println!("size: {} pre_cluster: {:?}", total_size, pre_cluster);
 
     let t_load = Instant::now();
     let df = load_embed(args.file.as_str());
@@ -49,7 +53,7 @@ fn main() {
 
     let mut fann = Fann::new(&provider);
     let t_build = Instant::now();
-    fann.build(None, &mut cache, &mut info);
+    fann.build(None, pre_cluster, &mut cache, &mut info);
     println!("build took {:?}", t_build.elapsed());
     let (hits, miss) = info.cache_hits_miss();
     println!(
@@ -63,7 +67,7 @@ fn main() {
 
     let embed_v = df.row(total_size);
     let embed = Embedding::as_embedding(embed_v);
-    let cache_factory = DistanceLocalCacheFactory::new();
+    let cache_factory = no_local_cache(); //DistanceLocalCacheFactory::new();
 
     let t_search = Instant::now();
     let closest = fann.get_closest(&embed, 10, &cache_factory, &mut info);
@@ -78,10 +82,10 @@ fn main() {
         miss,
         hits + miss,
     );
-    println!(
-        "{draw}",
-        draw = fann.draw(Some(&info), Some(closest), true, false)
-    );
+    // println!(
+    //     "{draw}",
+    //     draw = fann.draw(Some(&info), Some(closest), true, false)
+    // );
 
     let t_base_search = Instant::now();
     let base_closest = provider.get_closest(&embed, 10, &no_local_cache(), &mut no_info());

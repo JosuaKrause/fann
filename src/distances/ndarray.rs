@@ -17,7 +17,7 @@ impl<'a> Distance<ArrayView1<'a, f64>> for NdDotDistance {
         a: &Embedding<ArrayView1<'a, f64>>,
         b: &Embedding<ArrayView1<'a, f64>>,
     ) -> DistanceCmp {
-        DistanceCmp::of((-a.value.dot(&b.value)).exp())
+        DistanceCmp::of((-a.embed.dot(&b.embed)).exp())
     }
 
     fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64 {
@@ -36,7 +36,7 @@ impl<'a> Distance<ArrayView1<'a, f64>> for NdL2Distance {
         a: &Embedding<ArrayView1<'a, f64>>,
         b: &Embedding<ArrayView1<'a, f64>>,
     ) -> DistanceCmp {
-        let diff = &a.value - &b.value.view();
+        let diff = &a.embed - &b.embed.view();
         let res = (&diff * &diff).sum();
         DistanceCmp::of(res)
     }
@@ -91,7 +91,7 @@ impl<'a>
 {
     fn get_closest<I>(
         &self,
-        embed: &Embedding<ArrayView1<'a, f64>>,
+        other: &Embedding<ArrayView1<'a, f64>>,
         count: usize,
         _cache_factory: &NoLocalCacheFactory,
         _info: &mut I,
@@ -101,7 +101,7 @@ impl<'a>
     {
         let dists: Array1<DistanceCmp> = self
             .arr
-            .dot(&embed.value)
+            .dot(&other.embed)
             .map(|v| DistanceCmp::of((-v).exp()));
         let mut indices: Vec<usize> = (0..dists.len()).collect();
         indices.sort_unstable_by_key(|&ix| dists[ix]);
