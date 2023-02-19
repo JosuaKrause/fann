@@ -6,7 +6,8 @@ use std::{
 };
 
 use crate::{
-    info::Info, Cache, Distance, DistanceCmp, Embedding, EmbeddingProvider, NearestNeighbors,
+    info::Info, Cache, Distance, DistanceCmp, Embedding, EmbeddingProvider, LocalCache,
+    LocalCacheFactory, NearestNeighbors,
 };
 
 const HIGHLIGHT_A: &str = "*";
@@ -73,7 +74,7 @@ where
         self.children.len()
     }
 
-    fn get_dist<I>(
+    fn get_internal_dist<I>(
         &self,
         embed: &Embedding<T>,
         provider: &'a E,
@@ -87,17 +88,21 @@ where
         cache.cached_distance(&self.get_embed(provider), embed, distance, info)
     }
 
-    fn get_dist_min<I>(
-        &self,
-        embed: &Embedding<T>,
-        provider: &'a E,
-        cache: &mut C,
-        info: &mut I,
-    ) -> DistanceCmp
+    fn get_dist<I, L>(&self, provider: &'a E, cache: &mut L, info: &mut I) -> DistanceCmp
     where
         I: Info,
+        L: LocalCache<'a, D, T>,
     {
-        let dist = self.get_dist(embed, provider, cache, info);
+        let distance = provider.distance();
+        cache.cached_distance(&self.get_embed(provider), distance, info)
+    }
+
+    fn get_dist_min<I, L>(&self, provider: &'a E, cache: &mut L, info: &mut I) -> DistanceCmp
+    where
+        I: Info,
+        L: LocalCache<'a, D, T>,
+    {
+        let dist = self.get_dist(provider, cache, info);
         dist.combine(&self.radius, |d, radius| f64::max(0.0, d - radius))
     }
 
@@ -127,7 +132,7 @@ where
     ) where
         I: Info,
     {
-        let center_dist = self.get_dist(&child.get_embed(provider), provider, cache, info);
+        let center_dist = self.get_internal_dist(&child.get_embed(provider), provider, cache, info);
         self.count += child.count_descendants();
         self.children.push(Child {
             node: child,
@@ -137,18 +142,18 @@ where
             .sort_unstable_by(|a, b| a.center_dist.cmp(&b.center_dist).reverse());
     }
 
-    fn get_closest<I>(
+    fn get_closest<I, L>(
         &self,
         res: &mut Vec<(usize, DistanceCmp)>,
-        embed: &Embedding<T>,
         count: usize,
         provider: &'a E,
-        cache: &mut C,
+        cache: &mut L,
         info: &mut I,
     ) where
         I: Info,
+        L: LocalCache<'a, D, T>,
     {
-        let own_dist = self.get_dist(embed, provider, cache, info);
+        let own_dist = self.get_dist(provider, cache, info);
 
         fn max_dist(res: &Vec<(usize, DistanceCmp)>, count: usize) -> DistanceCmp {
             let index = count.min(res.len()) - 1;
@@ -186,27 +191,20 @@ where
                 if max_dist(res, count) < c_dist_est {
                     continue;
                 }
-                child
-                    .node
-                    .get_closest(res, embed, count, provider, cache, info);
+                child.node.get_closest(res, count, provider, cache, info);
             }
         } else {
             let mut inners: Vec<(&Node<E, D, C, T>, DistanceCmp)> = self
                 .children
                 .iter()
-                .map(|child| {
-                    (
-                        &child.node,
-                        child.node.get_dist_min(embed, provider, cache, info),
-                    )
-                })
+                .map(|child| (&child.node, child.node.get_dist_min(provider, cache, info)))
                 .collect::<Vec<(&Node<E, D, C, T>, DistanceCmp)>>();
             inners.sort_unstable_by(|(_, dist_a), (_, dist_b)| dist_a.cmp(dist_b));
             for (cnode, cmin) in inners.iter() {
                 if max_dist(res, count) < *cmin {
                     continue;
                 }
-                cnode.get_closest(res, embed, count, provider, cache, info);
+                cnode.get_closest(res, count, provider, cache, info);
             }
         }
     }
@@ -560,28 +558,30 @@ where
     }
 }
 
-impl<'a, E, D, C, T> NearestNeighbors<C, T> for Fann<'a, E, D, C, T>
+impl<'a, F, E, D, L, C, T: 'a> NearestNeighbors<'a, F, D, L, T> for Fann<'a, E, D, C, T>
 where
+    F: LocalCacheFactory<'a, D, L, T>,
     E: EmbeddingProvider<'a, D, T>,
     D: Distance<T> + Copy,
+    L: LocalCache<'a, D, T>,
     C: Cache,
-    T: 'a,
 {
     fn get_closest<I>(
         &self,
-        embed: &Embedding<T>,
+        embed: &'a Embedding<T>,
         count: usize,
-        cache: &mut C,
+        cache_factory: &F,
         info: &mut I,
     ) -> Vec<(usize, f64)>
     where
         I: Info,
     {
+        let mut cache = cache_factory.create(embed);
         let mut res: Vec<(usize, DistanceCmp)> = Vec::with_capacity(count + 1);
         self.root
             .as_ref()
             .unwrap()
-            .get_closest(&mut res, embed, count, self.provider, cache, info);
+            .get_closest(&mut res, count, self.provider, &mut cache, info);
         let distance = self.provider.distance();
         res.iter()
             .map(|(ix, v)| (*ix, distance.finalize_distance(v)))

@@ -3,7 +3,7 @@ use fann::distances::vec::{VecProvider, VEC_DOT_DISTANCE};
 use fann::info::{no_info, BaseInfo, Info};
 use std::time::Instant;
 
-use fann::cache::{no_cache, DistanceCache};
+use fann::cache::{no_local_cache, DistanceCache, DistanceLocalCacheFactory};
 use ndarray::{s, Array2, ArrayView2};
 use polars::io::prelude::*;
 use polars::prelude::Float64Type;
@@ -53,8 +53,8 @@ fn main() {
     println!("build took {:?}", t_build.elapsed());
     let (hits, miss) = info.cache_hits_miss();
     println!(
-        "cache[rate: {:.2} hits: {} miss: {} total: {}]",
-        info.cache_hit_rate(),
+        "cache[rate: {:.2}% hits: {} miss: {} total: {}]",
+        info.cache_hit_rate() * 100.0,
         hits,
         miss,
         hits + miss,
@@ -63,16 +63,17 @@ fn main() {
 
     let embed_v = df.row(total_size);
     let embed = Embedding::as_embedding(embed_v);
+    let cache_factory = DistanceLocalCacheFactory::new();
 
     let t_search = Instant::now();
-    let closest = fann.get_closest(&embed, 10, &mut cache, &mut info);
+    let closest = fann.get_closest(&embed, 10, &cache_factory, &mut info);
     println!("search took {:?}", t_search.elapsed());
     println!("{:?}", closest);
 
     let (hits, miss) = info.cache_hits_miss();
     println!(
-        "cache[rate: {:.2} hits: {} miss: {} total: {}]",
-        info.cache_hit_rate(),
+        "cache[rate: {:.2}% hits: {} miss: {} total: {}]",
+        info.cache_hit_rate() * 100.0,
         hits,
         miss,
         hits + miss,
@@ -83,7 +84,7 @@ fn main() {
     );
 
     let t_base_search = Instant::now();
-    let base_closest = provider.get_closest(&embed, 10, &mut no_cache(), &mut no_info());
+    let base_closest = provider.get_closest(&embed, 10, &no_local_cache(), &mut no_info());
     println!("baseline search took {:?}", t_base_search.elapsed());
     println!("{:?}", base_closest);
 
@@ -91,7 +92,7 @@ fn main() {
     let vv_embed = Embedding::as_embedding(&vv_embed_v);
 
     let t_vv_base_search = Instant::now();
-    let vv_base_closest = vv_provider.get_closest(&vv_embed, 10, &mut no_cache(), &mut no_info());
+    let vv_base_closest = vv_provider.get_closest(&vv_embed, 10, &no_local_cache(), &mut no_info());
     println!("vv baseline search took {:?}", t_vv_base_search.elapsed());
     println!("{:?}", vv_base_closest);
 }

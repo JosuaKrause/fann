@@ -1,6 +1,7 @@
 use crate::{
-    cache::NoCache, info::Info, Distance, DistanceCmp, Embedding, EmbeddingProvider,
-    NearestNeighbors,
+    cache::{NoLocalCache, NoLocalCacheFactory},
+    info::Info,
+    Distance, DistanceCmp, Embedding, EmbeddingProvider, NearestNeighbors,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -82,7 +83,9 @@ where
     }
 }
 
-impl<'a, D> NearestNeighbors<NoCache, &'a Vec<f64>> for VecProvider<'a, D>
+impl<'a, D>
+    NearestNeighbors<'a, NoLocalCacheFactory, D, NoLocalCache<'a, &'a Vec<f64>>, &'a Vec<f64>>
+    for VecProvider<'a, D>
 where
     D: Distance<&'a Vec<f64>>,
 {
@@ -90,7 +93,7 @@ where
         &self,
         embed: &Embedding<&'a Vec<f64>>,
         count: usize,
-        _cache: &mut NoCache,
+        _cache_factory: &NoLocalCacheFactory,
         _info: &mut I,
     ) -> Vec<(usize, f64)>
     where

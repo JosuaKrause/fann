@@ -156,15 +156,59 @@ pub trait Cache {
     }
 }
 
-pub trait NearestNeighbors<C, T>
+pub trait LocalCache<'a, D, T: 'a>
 where
-    C: Cache,
+    D: Distance<T>,
+{
+    fn get(&mut self, index: usize) -> Option<DistanceCmp>;
+    fn put(&mut self, index: usize, value: DistanceCmp);
+    fn embedding(&self) -> &'a Embedding<T>;
+
+    fn cached_distance<I>(&mut self, embed: &Embedding<T>, distance: D, info: &mut I) -> DistanceCmp
+    where
+        I: Info,
+    {
+        info.log_dist(&embed.index);
+        match embed.index {
+            None => {
+                info.log_cache_access(true);
+                distance.distance_cmp(self.embedding(), embed)
+            }
+            Some(index) => match self.get(index) {
+                Some(res) => {
+                    info.log_cache_access(false);
+                    res
+                }
+                None => {
+                    info.log_cache_access(true);
+                    let res = distance.distance_cmp(self.embedding(), embed);
+                    self.put(index, res);
+                    res
+                }
+            },
+        }
+    }
+}
+
+pub trait LocalCacheFactory<'a, D, L, T: 'a>
+where
+    D: Distance<T>,
+    L: LocalCache<'a, D, T>,
+{
+    fn create(&self, embed: &'a Embedding<T>) -> L;
+}
+
+pub trait NearestNeighbors<'a, F, D, L, T: 'a>
+where
+    F: LocalCacheFactory<'a, D, L, T>,
+    D: Distance<T>,
+    L: LocalCache<'a, D, T>,
 {
     fn get_closest<I>(
         &self,
-        embed: &Embedding<T>,
+        embed: &'a Embedding<T>,
         count: usize,
-        cache: &mut C,
+        cache_factory: &F,
         info: &mut I,
     ) -> Vec<(usize, f64)>
     where
