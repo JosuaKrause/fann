@@ -4,7 +4,7 @@ use fann::info::{no_info, BaseInfo, Info};
 use fann::kmed::FannTree;
 use std::time::Instant;
 
-use fann::cache::{no_local_cache, DistanceCache};
+use fann::cache::DistanceCache;
 use ndarray::{s, Array2, ArrayView2};
 use polars::io::prelude::*;
 use polars::prelude::Float64Type;
@@ -31,12 +31,18 @@ struct Args {
     total: usize,
     #[arg(short, long)]
     precluster: Option<usize>,
+    #[arg(long, default_value_t = false)]
+    force: bool,
+    #[arg(short, long, default_value_t = false)]
+    info: bool,
 }
 
 fn main() {
     let args = Args::parse();
-    let total_size: usize = args.total;
-    let pre_cluster: Option<usize> = args.precluster;
+    let total_size = args.total;
+    let pre_cluster = args.precluster;
+    let force = args.force;
+    let print_info = args.info;
     println!("size: {} pre_cluster: {:?}", total_size, pre_cluster);
 
     let t_load = Instant::now();
@@ -55,7 +61,7 @@ fn main() {
     let t_build = Instant::now();
     let tfilename = format!("tree-{}.zip", total_size);
     let tfile = std::path::Path::new(&tfilename);
-    if tfile.exists() {
+    if !force && tfile.exists() {
         fann.set_tree(
             FannTree::load(&std::fs::File::open(tfile).unwrap()).unwrap(),
             false,
@@ -84,28 +90,22 @@ fn main() {
 
     let embed_v = df.row(total_size);
     let embed = Embedding::as_embedding(embed_v);
-    let cache_factory = no_local_cache(); //DistanceLocalCacheFactory::new();
 
     let t_search = Instant::now();
-    let closest = fann.get_closest(&embed, 10, &cache_factory, &mut info);
+    let closest = fann.get_closest(&embed, 10, &mut info);
     println!("search took {:?}", t_search.elapsed());
     println!("{:?}", closest);
 
-    let (hits, miss) = info.cache_hits_miss();
-    println!(
-        "cache[rate: {:.2}% hits: {} miss: {} total: {}]",
-        info.cache_hit_rate() * 100.0,
-        hits,
-        miss,
-        hits + miss,
-    );
-    println!(
-        "{draw}",
-        draw = fann.draw(Some(&info), Some(closest), true, false)
-    );
+    println!("cache[total: {}]", info.dist_count());
+    if print_info {
+        println!(
+            "{draw}",
+            draw = fann.draw(Some(&info), Some(closest), true, false)
+        );
+    }
 
     let t_base_search = Instant::now();
-    let base_closest = provider.get_closest(&embed, 10, &no_local_cache(), &mut no_info());
+    let base_closest = provider.get_closest(&embed, 10, &mut no_info());
     println!("baseline search took {:?}", t_base_search.elapsed());
     println!("{:?}", base_closest);
 
@@ -113,7 +113,7 @@ fn main() {
     let vv_embed = Embedding::as_embedding(&vv_embed_v);
 
     let t_vv_base_search = Instant::now();
-    let vv_base_closest = vv_provider.get_closest(&vv_embed, 10, &no_local_cache(), &mut no_info());
+    let vv_base_closest = vv_provider.get_closest(&vv_embed, 10, &mut no_info());
     println!("vv baseline search took {:?}", t_vv_base_search.elapsed());
     println!("{:?}", vv_base_closest);
 }

@@ -1,11 +1,7 @@
 use digest::Digest;
 use ndarray::{Array1, ArrayView1, ArrayView2};
 
-use crate::{
-    cache::{NoLocalCache, NoLocalCacheFactory},
-    info::Info,
-    Distance, DistanceCmp, Embedding, EmbeddingProvider, NearestNeighbors,
-};
+use crate::{info::Info, Distance, DistanceCmp, Embedding, EmbeddingProvider, NearestNeighbors};
 
 #[derive(Debug, Clone, Copy)]
 pub struct NdDotDistance {}
@@ -99,20 +95,11 @@ where
     }
 }
 
-impl<'a>
-    NearestNeighbors<
-        'a,
-        NoLocalCacheFactory,
-        NdDotDistance,
-        NoLocalCache<'a, ArrayView1<'a, f64>>,
-        ArrayView1<'a, f64>,
-    > for NdProvider<'a, NdDotDistance>
-{
+impl<'a> NearestNeighbors<'a, ArrayView1<'a, f64>> for NdProvider<'a, NdDotDistance> {
     fn get_closest<I>(
         &self,
         other: &Embedding<ArrayView1<'a, f64>>,
         count: usize,
-        _cache_factory: &NoLocalCacheFactory,
         _info: &mut I,
     ) -> Vec<(usize, f64)>
     where

@@ -16,6 +16,7 @@ pub trait Info {
 
     fn scan_map(&self) -> IntoIter<usize, &str>;
     fn dist_vec(&self) -> Vec<usize>;
+    fn dist_count(&self) -> usize;
     fn clear(&mut self);
 }
 
@@ -41,6 +42,10 @@ impl Info for NoInfo {
 
     fn dist_vec(&self) -> Vec<usize> {
         Vec::new()
+    }
+
+    fn dist_count(&self) -> usize {
+        0
     }
 
     fn clear(&mut self) {}
@@ -95,6 +100,10 @@ impl Info for BaseInfo {
 
     fn dist_vec(&self) -> Vec<usize> {
         self.dist_vec.iter_ones().collect()
+    }
+
+    fn dist_count(&self) -> usize {
+        self.dist_vec.count_ones()
     }
 
     fn clear(&mut self) {

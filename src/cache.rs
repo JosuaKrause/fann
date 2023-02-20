@@ -1,6 +1,6 @@
-use std::{collections::HashMap, num::NonZeroUsize};
+use std::num::NonZeroUsize;
 
-use crate::{Cache, Distance, DistanceCmp, Embedding, Key, LocalCache, LocalCacheFactory};
+use crate::{Cache, DistanceCmp, Key};
 use lru::LruCache;
 
 pub struct DistanceCache {
@@ -38,93 +38,4 @@ impl Cache for NoCache {
     }
 
     fn put(&mut self, _key: Key, _value: DistanceCmp) {}
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct NoLocalCache<'a, T>
-where
-    T: 'a,
-{
-    embed: &'a Embedding<T>,
-}
-
-impl<'a, D, T> LocalCache<'a, D, T> for NoLocalCache<'a, T>
-where
-    D: Distance<T>,
-    T: 'a,
-{
-    fn get(&mut self, _index: usize) -> Option<DistanceCmp> {
-        None
-    }
-
-    fn put(&mut self, _index: usize, _value: DistanceCmp) {}
-
-    fn embedding(&self) -> &'a Embedding<T> {
-        self.embed
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct NoLocalCacheFactory {}
-
-pub fn no_local_cache() -> NoLocalCacheFactory {
-    NoLocalCacheFactory {}
-}
-
-impl<'a, D, T> LocalCacheFactory<'a, D, NoLocalCache<'a, T>, T> for NoLocalCacheFactory
-where
-    D: Distance<T>,
-    T: 'a,
-{
-    fn create(&self, embed: &'a Embedding<T>) -> NoLocalCache<'a, T> {
-        NoLocalCache { embed }
-    }
-}
-
-pub struct DistanceLocalCache<'a, T>
-where
-    T: 'a,
-{
-    map: HashMap<usize, DistanceCmp>,
-    embed: &'a Embedding<T>,
-}
-
-impl<'a, D, T> LocalCache<'a, D, T> for DistanceLocalCache<'a, T>
-where
-    D: Distance<T>,
-    T: 'a,
-{
-    fn get(&mut self, index: usize) -> Option<DistanceCmp> {
-        self.map.get(&index).map(|&res| res)
-    }
-
-    fn put(&mut self, index: usize, value: DistanceCmp) {
-        self.map.insert(index, value);
-    }
-
-    fn embedding(&self) -> &'a Embedding<T> {
-        self.embed
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct DistanceLocalCacheFactory {}
-
-impl DistanceLocalCacheFactory {
-    pub fn new() -> Self {
-        DistanceLocalCacheFactory {}
-    }
-}
-
-impl<'a, D, T> LocalCacheFactory<'a, D, DistanceLocalCache<'a, T>, T> for DistanceLocalCacheFactory
-where
-    D: Distance<T>,
-    T: 'a,
-{
-    fn create(&self, embed: &'a Embedding<T>) -> DistanceLocalCache<'a, T> {
-        DistanceLocalCache {
-            embed,
-            map: HashMap::new(),
-        }
-    }
 }

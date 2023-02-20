@@ -2,8 +2,7 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use crate::{
-    info::Info, Cache, Distance, Embedding, EmbeddingProvider, LocalCache, LocalCacheFactory,
-    NearestNeighbors,
+    info::Info, Cache, Distance, Embedding, EmbeddingProvider, LocalDistance, NearestNeighbors,
 };
 
 pub mod kmed;
@@ -45,16 +44,14 @@ where
     where
         I: Info;
 
-    fn get_closest<L, I>(
+    fn get_closest<I>(
         &self,
         count: usize,
-        provider: &'a E,
-        cache: &mut L,
+        ldist: &LocalDistance<'a, E, D, T>,
         info: &mut I,
     ) -> Vec<(usize, f64)>
     where
-        I: Info,
-        L: LocalCache<'a, D, T>;
+        I: Info;
 
     fn fingerprint(&self) -> (&str, &str);
 }
@@ -153,12 +150,10 @@ where
     }
 }
 
-impl<'a, F, E, D, L, N, T> NearestNeighbors<'a, F, D, L, T> for Fann<'a, E, D, N, T>
+impl<'a, E, D, N, T> NearestNeighbors<'a, T> for Fann<'a, E, D, N, T>
 where
-    F: LocalCacheFactory<'a, D, L, T>,
     E: EmbeddingProvider<'a, D, T>,
     D: Distance<T> + Copy,
-    L: LocalCache<'a, D, T>,
     N: Tree<'a, E, D, T>,
     T: 'a,
 {
@@ -166,16 +161,15 @@ where
         &self,
         other: &'a Embedding<T>,
         count: usize,
-        cache_factory: &F,
         info: &mut I,
     ) -> Vec<(usize, f64)>
     where
         I: Info,
     {
-        let mut cache = cache_factory.create(other);
+        let ldist = LocalDistance::new(self.provider, other);
         self.get_tree()
             .as_ref()
             .unwrap()
-            .get_closest(count, self.provider, &mut cache, info)
+            .get_closest(count, &ldist, info)
     }
 }

@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use blake2::Blake2s256;
 use digest::Digest;
 use serde::{Deserialize, Serialize};
@@ -173,62 +175,54 @@ pub trait Cache {
     }
 }
 
-pub trait LocalCache<'a, D, T>
+pub struct LocalDistance<'a, E, D, T>
 where
-    D: Distance<T>,
+    E: EmbeddingProvider<'a, D, T>,
+    D: Distance<T> + Copy,
     T: 'a,
 {
-    fn get(&mut self, index: usize) -> Option<DistanceCmp>;
-    fn put(&mut self, index: usize, value: DistanceCmp);
-    fn embedding(&self) -> &'a Embedding<T>;
+    provider: &'a E,
+    embed: &'a Embedding<T>,
+    distance_type: PhantomData<D>,
+}
 
-    fn cached_distance<I>(&mut self, embed: &Embedding<T>, distance: D, info: &mut I) -> DistanceCmp
+impl<'a, E, D, T> LocalDistance<'a, E, D, T>
+where
+    E: EmbeddingProvider<'a, D, T>,
+    D: Distance<T> + Copy,
+    T: 'a,
+{
+    pub fn new(provider: &'a E, embed: &'a Embedding<T>) -> Self {
+        LocalDistance {
+            provider,
+            embed,
+            distance_type: PhantomData,
+        }
+    }
+
+    pub fn distance_cmp<I>(&self, index: usize, info: &mut I) -> DistanceCmp
     where
         I: Info,
     {
-        info.log_dist(&embed.index);
-        match embed.index {
-            None => {
-                info.log_cache_access(true);
-                distance.distance_cmp(self.embedding(), embed)
-            }
-            Some(index) => match self.get(index) {
-                Some(res) => {
-                    info.log_cache_access(false);
-                    res
-                }
-                None => {
-                    info.log_cache_access(true);
-                    let res = distance.distance_cmp(self.embedding(), embed);
-                    self.put(index, res);
-                    res
-                }
-            },
-        }
+        info.log_dist(&Some(index));
+        let distance = self.provider.distance();
+        distance.distance_cmp(self.embed, &self.provider.get(index))
+    }
+
+    pub fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64 {
+        let distance = self.provider.distance();
+        distance.finalize_distance(dist_cmp)
     }
 }
 
-pub trait LocalCacheFactory<'a, D, L, T>
+pub trait NearestNeighbors<'a, T>
 where
-    D: Distance<T>,
-    L: LocalCache<'a, D, T>,
-    T: 'a,
-{
-    fn create(&self, embed: &'a Embedding<T>) -> L;
-}
-
-pub trait NearestNeighbors<'a, F, D, L, T>
-where
-    F: LocalCacheFactory<'a, D, L, T>,
-    D: Distance<T>,
-    L: LocalCache<'a, D, T>,
     T: 'a,
 {
     fn get_closest<I>(
         &self,
         other: &'a Embedding<T>,
         count: usize,
-        cache_factory: &F,
         info: &mut I,
     ) -> Vec<(usize, f64)>
     where
