@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::info::Info;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct DistanceCmp(f64);
 
 impl DistanceCmp {

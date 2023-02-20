@@ -1,14 +1,15 @@
 use clap::{arg, Parser};
 use fann::distances::vec::{VecProvider, VEC_DOT_DISTANCE};
 use fann::info::{no_info, BaseInfo, Info};
+use fann::kmed::FannTree;
 use std::time::Instant;
 
 use fann::cache::{no_local_cache, DistanceCache};
-use ndarray::{s, Array2, ArrayView2};
+use ndarray::{s, Array2, ArrayView1, ArrayView2};
 use polars::io::prelude::*;
 use polars::prelude::Float64Type;
 
-use fann::distances::ndarray::{NdProvider, ND_DOT_DISTANCE};
+use fann::distances::ndarray::{NdDotDistance, NdProvider, ND_DOT_DISTANCE};
 use fann::{Embedding, EmbeddingProvider, Fann, NearestNeighbors};
 
 fn load_embed(path: &str) -> Array2<f64> {
@@ -51,7 +52,12 @@ fn main() {
     let mut cache = DistanceCache::new(100000);
     println!("{size:?}", size = provider.all());
 
-    let mut fann = Fann::new(&provider);
+    let mut fann: Fann<
+        NdProvider<NdDotDistance>,
+        NdDotDistance,
+        FannTree<NdProvider<NdDotDistance>, NdDotDistance, ArrayView1<f64>>,
+        ArrayView1<f64>,
+    > = Fann::new(&provider);
     let t_build = Instant::now();
     fann.build(None, pre_cluster, &mut cache, &mut info);
     println!("build took {:?}", t_build.elapsed());
