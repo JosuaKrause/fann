@@ -1,3 +1,4 @@
+use digest::Digest;
 use ndarray::{Array1, ArrayView1, ArrayView2};
 
 use crate::{
@@ -23,6 +24,10 @@ impl<'a> Distance<ArrayView1<'a, f64>> for NdDotDistance {
     fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64 {
         dist_cmp.to()
     }
+
+    fn name(&self) -> &str {
+        "dot"
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -43,6 +48,10 @@ impl<'a> Distance<ArrayView1<'a, f64>> for NdL2Distance {
 
     fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64 {
         dist_cmp.to().sqrt()
+    }
+
+    fn name(&self) -> &str {
+        "l2"
     }
 }
 
@@ -77,6 +86,16 @@ where
 
     fn distance(&self) -> D {
         self.distance
+    }
+
+    fn hash_embed<H>(&self, index: usize, hasher: &mut H)
+    where
+        H: Digest,
+    {
+        self.arr
+            .row(index)
+            .iter()
+            .for_each(|v| hasher.update(v.to_be_bytes()));
     }
 }
 

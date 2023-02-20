@@ -3,6 +3,7 @@ use crate::{
     info::Info,
     Distance, DistanceCmp, Embedding, EmbeddingProvider, NearestNeighbors,
 };
+use digest::Digest;
 
 #[derive(Debug, Clone, Copy)]
 pub struct VecDotDistance {}
@@ -22,6 +23,10 @@ impl Distance<&Vec<f64>> for VecDotDistance {
 
     fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64 {
         dist_cmp.to()
+    }
+
+    fn name(&self) -> &str {
+        "dot"
     }
 }
 
@@ -43,6 +48,10 @@ impl Distance<&Vec<f64>> for VecL2Distance {
 
     fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64 {
         dist_cmp.to().sqrt()
+    }
+
+    fn name(&self) -> &str {
+        "l2"
     }
 }
 
@@ -80,6 +89,15 @@ where
 
     fn distance(&self) -> D {
         self.distance
+    }
+
+    fn hash_embed<H>(&self, index: usize, hasher: &mut H)
+    where
+        H: Digest,
+    {
+        self.embeddings[index]
+            .iter()
+            .for_each(|v| hasher.update(v.to_be_bytes()));
     }
 }
 

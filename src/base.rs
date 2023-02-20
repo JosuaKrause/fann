@@ -1,3 +1,5 @@
+use blake2::Blake2s256;
+use digest::Digest;
 use serde::{Deserialize, Serialize};
 
 use crate::info::Info;
@@ -68,6 +70,7 @@ impl<T> Embedding<T> {
 pub trait Distance<T> {
     fn distance_cmp(&self, a: &Embedding<T>, b: &Embedding<T>) -> DistanceCmp;
     fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64;
+    fn name(&self) -> &str;
 }
 
 pub trait EmbeddingProvider<'a, D, T>
@@ -80,6 +83,20 @@ where
 
     fn get(&'a self, index: usize) -> Embedding<T> {
         Embedding::wrap(self.get_embed(index), index)
+    }
+
+    fn hash_embed<H>(&self, index: usize, hasher: &mut H)
+    where
+        H: Digest;
+
+    fn compute_hash(&self) -> String {
+        let mut hasher = Blake2s256::new();
+        let all = self.all();
+        hasher.update(all.start.to_be_bytes());
+        hasher.update(all.end.to_be_bytes());
+        all.into_iter()
+            .for_each(|ix| self.hash_embed(ix, &mut hasher));
+        format!("{hash:x}", hash = hasher.finalize())
     }
 }
 

@@ -325,6 +325,8 @@ where
     T: 'a,
 {
     root: Node<'a, E, D, T>,
+    hash: String,
+    distance_name: String,
 }
 
 impl<'a, E, D, T> FannTree<'a, E, D, T>
@@ -560,6 +562,8 @@ where
                 max_node_size,
                 pre_cluster,
             ),
+            hash: provider.compute_hash(),
+            distance_name: provider.distance().name().to_string(),
         }
     }
 
@@ -620,5 +624,9 @@ where
         res.iter()
             .map(|(ix, v)| (*ix, distance.finalize_distance(v)))
             .collect()
+    }
+
+    fn fingerprint(&self) -> (&str, &str) {
+        (&self.hash, &self.distance_name)
     }
 }

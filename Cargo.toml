@@ -7,9 +7,12 @@ edition = "2021"
 
 [dependencies]
 bitvec = "1.0.1"
+blake2 = "0.10.6"
 clap = { version = "4.1.6", features = ["derive"] }
+digest = "0.10.6"
 lru = "0.9.0"
 ndarray = "0.15.6"
 polars = { version = "0.27.2", features = ["parquet", "ndarray"] }
 rayon = "1.6.1"
 serde = { version = "1.0.152", features = ["derive"] }
+serde_json = "1.0.93"

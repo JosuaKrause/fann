@@ -61,6 +61,9 @@ fn main() {
     let t_build = Instant::now();
     fann.build(None, pre_cluster, &mut cache, &mut info);
     println!("build took {:?}", t_build.elapsed());
+    // let tree = fann.get_tree().unwrap();
+    // let tree_json = serde_json::to_string(&tree).unwrap();
+    // println!("{}", tree_json);
     let (hits, miss) = info.cache_hits_miss();
     println!(
         "cache[rate: {:.2}% hits: {} miss: {} total: {}]",

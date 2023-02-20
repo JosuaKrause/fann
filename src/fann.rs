@@ -1,3 +1,4 @@
+use std::fmt;
 use std::marker::PhantomData;
 
 use crate::{
@@ -6,6 +7,15 @@ use crate::{
 };
 
 pub mod kmed;
+
+#[derive(Debug, Clone)]
+pub struct MisconfiguredTreeError;
+
+impl fmt::Display for MisconfiguredTreeError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "tree was created for different provider")
+    }
+}
 
 pub trait Tree<'a, E, D, T>
 where
@@ -45,6 +55,8 @@ where
     where
         I: Info,
         L: LocalCache<'a, D, T>;
+
+    fn fingerprint(&self) -> (&str, &str);
 }
 
 pub struct Fann<'a, E, D, N, T>
@@ -80,8 +92,22 @@ where
         &self.root
     }
 
-    pub fn set_tree(&mut self, tree: N) {
+    pub fn set_tree(
+        &mut self,
+        tree: N,
+        ignore_provider: bool,
+    ) -> Result<(), MisconfiguredTreeError> {
+        if !ignore_provider {
+            let (phash, dname) = tree.fingerprint();
+            if dname != self.provider.distance().name() {
+                return Err(MisconfiguredTreeError);
+            }
+            if phash != &self.provider.compute_hash() {
+                return Err(MisconfiguredTreeError);
+            }
+        }
         self.root = Some(tree);
+        Ok(())
     }
 
     pub fn clear_tree(&mut self) {
