@@ -1,13 +1,50 @@
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{self, Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
     iter::repeat,
 };
+use zip::{result::ZipError, write::FileOptions};
 
 use crate::{
     info::Info, Cache, Distance, DistanceCmp, Embedding, EmbeddingProvider, LocalCache, Tree,
 };
+
+#[derive(Debug)]
+pub enum TreeLoadError {
+    ZipError(ZipError),
+    SerdeError(serde_json::Error),
+}
+
+impl From<ZipError> for TreeLoadError {
+    fn from(value: ZipError) -> Self {
+        TreeLoadError::ZipError(value)
+    }
+}
+
+impl From<serde_json::Error> for TreeLoadError {
+    fn from(value: serde_json::Error) -> Self {
+        TreeLoadError::SerdeError(value)
+    }
+}
+
+#[derive(Debug)]
+pub enum TreeWriteError {
+    ZipError(ZipError),
+    SerdeError(serde_json::Error),
+}
+
+impl From<ZipError> for TreeWriteError {
+    fn from(value: ZipError) -> Self {
+        TreeWriteError::ZipError(value)
+    }
+}
+
+impl From<serde_json::Error> for TreeWriteError {
+    fn from(value: serde_json::Error) -> Self {
+        TreeWriteError::SerdeError(value)
+    }
+}
 
 const HIGHLIGHT_A: &str = "*";
 const HIGHLIGHT_B: &str = ":";
@@ -23,7 +60,6 @@ struct Child {
 struct Node {
     centroid_index: usize,
     radius: DistanceCmp,
-    count: usize,
     children: Vec<Child>,
 }
 
@@ -32,7 +68,6 @@ impl Node {
         Node {
             centroid_index,
             radius: DistanceCmp::zero(),
-            count: 1,
             children: Vec::new(),
         }
     }
@@ -46,8 +81,8 @@ impl Node {
         provider.get(self.centroid_index)
     }
 
-    fn count_descendants(&self) -> usize {
-        self.count
+    fn is_before_leaf(&self) -> bool {
+        self.children.iter().all(|c| c.node.children.is_empty())
     }
 
     fn count_children(&self) -> usize {
@@ -137,7 +172,6 @@ impl Node {
         I: Info,
     {
         let center_dist = self.get_internal_dist(&child.get_embed(provider), provider, cache, info);
-        self.count += child.count_descendants();
         self.children.push(Child {
             node: child,
             center_dist,
@@ -244,7 +278,7 @@ impl Node {
         if children_count == 0 {
             return Vec::from([own]);
         }
-        if !radius && self.count_descendants() == children_count + 1 {
+        if !radius && self.is_before_leaf() {
             let mut chs = self
                 .children
                 .iter()
@@ -533,6 +567,23 @@ impl FannTree {
         }
         node.compute_radius();
         node
+    }
+
+    pub fn load(file: &std::fs::File) -> Result<Self, TreeLoadError> {
+        let mut archive = zip::ZipArchive::new(file)?;
+        let zip_file = archive.by_name("tree.json")?;
+        let res: Self = serde_json::from_reader(zip_file)?;
+        Ok(res)
+    }
+
+    pub fn save(&self, file: &std::fs::File) -> Result<(), TreeWriteError> {
+        let mut zip = zip::ZipWriter::new(file);
+        let options = FileOptions::default()
+            .compression_method(zip::CompressionMethod::Bzip2)
+            .unix_permissions(0o755);
+        zip.start_file("tree.json", options)?;
+        serde_json::to_writer(zip, self)?;
+        Ok(())
     }
 }
 

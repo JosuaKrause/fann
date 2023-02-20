@@ -132,6 +132,25 @@ where
             info,
         ));
     }
+
+    pub fn draw<I>(
+        &self,
+        info: Option<&I>,
+        res: Option<Vec<(usize, f64)>>,
+        prune: bool,
+        radius: bool,
+    ) -> String
+    where
+        I: Info,
+    {
+        self.root.as_ref().unwrap().draw(
+            self.provider.all().last().unwrap(),
+            info,
+            res,
+            prune,
+            radius,
+        )
+    }
 }
 
 impl<'a, F, E, D, L, N, T> NearestNeighbors<'a, F, D, L, T> for Fann<'a, E, D, N, T>

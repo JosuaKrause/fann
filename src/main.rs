@@ -49,25 +49,38 @@ fn main() {
     let vv = to_vec_vec(df.slice(s![0..total_size, ..]));
     let vv_provider = VecProvider::new(&vv, VEC_DOT_DISTANCE);
 
-    let mut cache = DistanceCache::new(100000);
     println!("{size:?}", size = provider.all());
 
     let mut fann = Fann::new(&provider);
     let t_build = Instant::now();
-    fann.build(None, pre_cluster, &mut cache, &mut info);
-    println!("build took {:?}", t_build.elapsed());
-    let tree: &FannTree = fann.get_tree().as_ref().unwrap();
-    let tree_json = serde_json::to_string(&tree).unwrap();
-    println!("{}", tree_json);
-    let (hits, miss) = info.cache_hits_miss();
-    println!(
-        "cache[rate: {:.2}% hits: {} miss: {} total: {}]",
-        info.cache_hit_rate() * 100.0,
-        hits,
-        miss,
-        hits + miss,
-    );
-    info.clear();
+    let tfilename = format!("tree-{}.zip", total_size);
+    let tfile = std::path::Path::new(&tfilename);
+    if tfile.exists() {
+        fann.set_tree(
+            FannTree::load(&std::fs::File::open(tfile).unwrap()).unwrap(),
+            false,
+        )
+        .unwrap();
+        println!("load took {:?}", t_build.elapsed());
+    } else {
+        let mut cache = DistanceCache::new(100000);
+        fann.build(None, pre_cluster, &mut cache, &mut info);
+        fann.get_tree()
+            .as_ref()
+            .unwrap()
+            .save(&std::fs::File::create(tfile).unwrap())
+            .unwrap();
+        println!("build took {:?}", t_build.elapsed());
+        let (hits, miss) = info.cache_hits_miss();
+        println!(
+            "cache[rate: {:.2}% hits: {} miss: {} total: {}]",
+            info.cache_hit_rate() * 100.0,
+            hits,
+            miss,
+            hits + miss,
+        );
+        info.clear();
+    }
 
     let embed_v = df.row(total_size);
     let embed = Embedding::as_embedding(embed_v);
@@ -86,10 +99,10 @@ fn main() {
         miss,
         hits + miss,
     );
-    // println!(
-    //     "{draw}",
-    //     draw = fann.draw(Some(&info), Some(closest), true, false)
-    // );
+    println!(
+        "{draw}",
+        draw = fann.draw(Some(&info), Some(closest), true, false)
+    );
 
     let t_base_search = Instant::now();
     let base_closest = provider.get_closest(&embed, 10, &no_local_cache(), &mut no_info());
