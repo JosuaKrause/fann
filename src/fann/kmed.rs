@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
     iter::repeat,
-    marker::PhantomData,
 };
 
 use crate::{
@@ -15,53 +14,35 @@ const HIGHLIGHT_B: &str = ":";
 const NO_HIGHLIGHT: &str = "";
 
 #[derive(Serialize, Deserialize)]
-struct Child<'a, E, D, T>
-where
-    E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T> + Copy,
-    T: 'a,
-{
-    #[serde(flatten)]
-    node: Node<'a, E, D, T>,
-    #[serde(flatten)]
+struct Child {
+    node: Node,
     center_dist: DistanceCmp,
 }
 
 #[derive(Serialize, Deserialize)]
-struct Node<'a, E, D, T>
-where
-    E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T> + Copy,
-    T: 'a,
-{
+struct Node {
     centroid_index: usize,
     radius: DistanceCmp,
     count: usize,
-    children: Vec<Child<'a, E, D, T>>,
-    provider_type: PhantomData<&'a E>,
-    distance_type: PhantomData<D>,
-    embed_type: PhantomData<T>,
+    children: Vec<Child>,
 }
 
-impl<'a, E, D, T> Node<'a, E, D, T>
-where
-    E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T> + Copy,
-    T: 'a,
-{
+impl Node {
     fn new(centroid_index: usize) -> Self {
         Node {
             centroid_index,
             radius: DistanceCmp::zero(),
             count: 1,
             children: Vec::new(),
-            provider_type: PhantomData,
-            distance_type: PhantomData,
-            embed_type: PhantomData,
         }
     }
 
-    fn get_embed(&self, provider: &'a E) -> Embedding<T> {
+    fn get_embed<'a, E, D, T>(&self, provider: &'a E) -> Embedding<T>
+    where
+        E: EmbeddingProvider<'a, D, T>,
+        D: Distance<T> + Copy,
+        T: 'a,
+    {
         provider.get(self.centroid_index)
     }
 
@@ -73,7 +54,7 @@ where
         self.children.len()
     }
 
-    fn get_internal_dist<C, I>(
+    fn get_internal_dist<'a, E, D, T, C, I>(
         &self,
         embed: &Embedding<T>,
         provider: &'a E,
@@ -81,6 +62,9 @@ where
         info: &mut I,
     ) -> DistanceCmp
     where
+        E: EmbeddingProvider<'a, D, T>,
+        D: Distance<T> + Copy,
+        T: 'a,
         C: Cache,
         I: Info,
     {
@@ -88,8 +72,16 @@ where
         cache.cached_distance(&self.get_embed(provider), embed, distance, info)
     }
 
-    fn get_dist<I, L>(&self, provider: &'a E, cache: &mut L, info: &mut I) -> DistanceCmp
+    fn get_dist<'a, E, D, T, I, L>(
+        &self,
+        provider: &'a E,
+        cache: &mut L,
+        info: &mut I,
+    ) -> DistanceCmp
     where
+        E: EmbeddingProvider<'a, D, T>,
+        D: Distance<T> + Copy,
+        T: 'a,
         I: Info,
         L: LocalCache<'a, D, T>,
     {
@@ -97,8 +89,16 @@ where
         cache.cached_distance(&self.get_embed(provider), distance, info)
     }
 
-    fn get_dist_min<I, L>(&self, provider: &'a E, cache: &mut L, info: &mut I) -> DistanceCmp
+    fn get_dist_min<'a, E, D, T, I, L>(
+        &self,
+        provider: &'a E,
+        cache: &mut L,
+        info: &mut I,
+    ) -> DistanceCmp
     where
+        E: EmbeddingProvider<'a, D, T>,
+        D: Distance<T> + Copy,
+        T: 'a,
         I: Info,
         L: LocalCache<'a, D, T>,
     {
@@ -106,7 +106,7 @@ where
         dist.combine(&self.radius, |d, radius| f64::max(0.0, d - radius))
     }
 
-    fn get_child_dist_max(child: &Child<'a, E, D, T>) -> DistanceCmp {
+    fn get_child_dist_max(child: &Child) -> DistanceCmp {
         child
             .center_dist
             .combine(&child.node.radius, |center_dist, radius| {
@@ -123,13 +123,16 @@ where
             .unwrap_or(DistanceCmp::zero());
     }
 
-    fn add_child<C, I>(
+    fn add_child<'a, E, D, T, C, I>(
         &mut self,
-        child: Node<'a, E, D, T>,
+        child: Node,
         provider: &'a E,
         cache: &mut C,
         info: &mut I,
     ) where
+        E: EmbeddingProvider<'a, D, T>,
+        D: Distance<T> + Copy,
+        T: 'a,
         C: Cache,
         I: Info,
     {
@@ -143,7 +146,7 @@ where
             .sort_unstable_by(|a, b| a.center_dist.cmp(&b.center_dist).reverse());
     }
 
-    fn get_closest<I, L>(
+    fn get_closest<'a, E, D, T, I, L>(
         &self,
         res: &mut Vec<(usize, DistanceCmp)>,
         count: usize,
@@ -151,6 +154,9 @@ where
         cache: &mut L,
         info: &mut I,
     ) where
+        E: EmbeddingProvider<'a, D, T>,
+        D: Distance<T> + Copy,
+        T: 'a,
         I: Info,
         L: LocalCache<'a, D, T>,
     {
@@ -161,16 +167,12 @@ where
             res[index].1
         }
 
-        fn add_node<'a, E, D, T>(
+        fn add_node(
             res: &mut Vec<(usize, DistanceCmp)>,
-            node: &Node<'a, E, D, T>,
+            node: &Node,
             distance: DistanceCmp,
             count: usize,
-        ) where
-            E: EmbeddingProvider<'a, D, T>,
-            D: Distance<T> + Copy,
-            T: 'a,
-        {
+        ) {
             let element = (node.centroid_index, distance);
             let mindex = res.binary_search_by(|&(_, dist)| dist.cmp(&distance));
             match mindex {
@@ -194,7 +196,7 @@ where
                 child.node.get_closest(res, count, provider, cache, info);
             }
         } else {
-            let mut inners: Vec<(&Node<E, D, T>, DistanceCmp)> = self
+            let mut inners: Vec<(&Node, DistanceCmp)> = self
                 .children
                 .iter()
                 .map(|child| (&child.node, child.node.get_dist_min(provider, cache, info)))
@@ -318,24 +320,14 @@ where
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct FannTree<'a, E, D, T>
-where
-    E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T> + Copy,
-    T: 'a,
-{
-    root: Node<'a, E, D, T>,
+pub struct FannTree {
+    root: Node,
     hash: String,
     distance_name: String,
 }
 
-impl<'a, E, D, T> FannTree<'a, E, D, T>
-where
-    E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T> + Copy,
-    T: 'a,
-{
-    fn get_dist<C, I>(
+impl FannTree {
+    fn get_dist<'a, E, D, T, C, I>(
         provider: &E,
         embed_a: &Embedding<T>,
         embed_b: &Embedding<T>,
@@ -343,14 +335,25 @@ where
         info: &mut I,
     ) -> DistanceCmp
     where
+        E: EmbeddingProvider<'a, D, T>,
+        D: Distance<T> + Copy,
+        T: 'a,
         C: Cache,
         I: Info,
     {
         cache.cached_distance(embed_a, embed_b, provider.distance(), info)
     }
 
-    fn centroid<C, I>(provider: &'a E, all_ixs: &Vec<usize>, cache: &mut C, info: &mut I) -> usize
+    fn centroid<'a, E, D, T, C, I>(
+        provider: &'a E,
+        all_ixs: &Vec<usize>,
+        cache: &mut C,
+        info: &mut I,
+    ) -> usize
     where
+        E: EmbeddingProvider<'a, D, T>,
+        D: Distance<T> + Copy,
+        T: 'a,
         C: Cache,
         I: Info,
     {
@@ -381,7 +384,7 @@ where
         res_ix.unwrap()
     }
 
-    fn kmedoid<C, I>(
+    fn kmedoid<'a, E, D, T, C, I>(
         provider: &'a E,
         all_ixs: Vec<usize>,
         init_centroids: Option<Vec<usize>>,
@@ -390,6 +393,9 @@ where
         info: &mut I,
     ) -> Vec<(usize, Vec<usize>)>
     where
+        E: EmbeddingProvider<'a, D, T>,
+        D: Distance<T> + Copy,
+        T: 'a,
         C: Cache,
         I: Info,
     {
@@ -453,7 +459,7 @@ where
         ixs.retain(|&ix| ix != index);
     }
 
-    fn build_level<C, I>(
+    fn build_level<'a, E, D, T, C, I>(
         provider: &'a E,
         cache: &mut C,
         info: &mut I,
@@ -461,12 +467,15 @@ where
         cur_all_ixs: Vec<usize>,
         max_node_size: usize,
         pre_cluster: Option<usize>,
-    ) -> Node<'a, E, D, T>
+    ) -> Node
     where
+        E: EmbeddingProvider<'a, D, T>,
+        D: Distance<T> + Copy,
+        T: 'a,
         C: Cache,
         I: Info,
     {
-        let mut node: Node<'a, E, D, T> = Node::new(cur_root_ix);
+        let mut node = Node::new(cur_root_ix);
         let num_k = if max_node_size * max_node_size > cur_all_ixs.len() {
             ((cur_all_ixs.len() as f64).sqrt() as usize).max(1)
         } else {
@@ -474,7 +483,7 @@ where
         };
         if num_k == 1 || cur_all_ixs.len() <= num_k {
             cur_all_ixs.iter().for_each(|&ix| {
-                let mut cnode: Node<'a, E, D, T> = Node::new(ix);
+                let mut cnode = Node::new(ix);
                 cnode.compute_radius();
                 node.add_child(cnode, provider, cache, info);
             });
@@ -527,7 +536,7 @@ where
     }
 }
 
-impl<'a, E, D, T> Tree<'a, E, D, T> for FannTree<'a, E, D, T>
+impl<'a, E, D, T> Tree<'a, E, D, T> for FannTree
 where
     E: EmbeddingProvider<'a, D, T>,
     D: Distance<T> + Copy,

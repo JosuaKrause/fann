@@ -5,11 +5,11 @@ use fann::kmed::FannTree;
 use std::time::Instant;
 
 use fann::cache::{no_local_cache, DistanceCache};
-use ndarray::{s, Array2, ArrayView1, ArrayView2};
+use ndarray::{s, Array2, ArrayView2};
 use polars::io::prelude::*;
 use polars::prelude::Float64Type;
 
-use fann::distances::ndarray::{NdDotDistance, NdProvider, ND_DOT_DISTANCE};
+use fann::distances::ndarray::{NdProvider, ND_DOT_DISTANCE};
 use fann::{Embedding, EmbeddingProvider, Fann, NearestNeighbors};
 
 fn load_embed(path: &str) -> Array2<f64> {
@@ -52,18 +52,13 @@ fn main() {
     let mut cache = DistanceCache::new(100000);
     println!("{size:?}", size = provider.all());
 
-    let mut fann: Fann<
-        NdProvider<NdDotDistance>,
-        NdDotDistance,
-        FannTree<NdProvider<NdDotDistance>, NdDotDistance, ArrayView1<f64>>,
-        ArrayView1<f64>,
-    > = Fann::new(&provider);
+    let mut fann = Fann::new(&provider);
     let t_build = Instant::now();
     fann.build(None, pre_cluster, &mut cache, &mut info);
     println!("build took {:?}", t_build.elapsed());
-    // let tree = fann.get_tree().unwrap();
-    // let tree_json = serde_json::to_string(&tree).unwrap();
-    // println!("{}", tree_json);
+    let tree: &FannTree = fann.get_tree().as_ref().unwrap();
+    let tree_json = serde_json::to_string(&tree).unwrap();
+    println!("{}", tree_json);
     let (hits, miss) = info.cache_hits_miss();
     println!(
         "cache[rate: {:.2}% hits: {} miss: {} total: {}]",
