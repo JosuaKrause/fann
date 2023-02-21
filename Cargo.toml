@@ -12,6 +12,7 @@ lto = true
 bitvec = "1.0.1"
 blake2 = "0.10.6"
 clap = { version = "4.1.6", features = ["derive"] }
+dashmap = "5.4.0"
 digest = "0.10.6"
 flate2 = "1.0.25"
 lru = "0.9.0"
