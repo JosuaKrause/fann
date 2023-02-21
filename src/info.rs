@@ -17,6 +17,9 @@ pub trait Info {
     fn scan_map(&self) -> IntoIter<usize, &str>;
     fn dist_vec(&self) -> Vec<usize>;
     fn dist_count(&self) -> usize;
+
+    fn sub_info(&self) -> Self;
+    fn consume(&mut self, other: Self);
     fn clear(&mut self);
 }
 
@@ -47,6 +50,12 @@ impl Info for NoInfo {
     fn dist_count(&self) -> usize {
         0
     }
+
+    fn sub_info(&self) -> Self {
+        Self {}
+    }
+
+    fn consume(&mut self, _other: Self) {}
 
     fn clear(&mut self) {}
 }
@@ -104,6 +113,17 @@ impl Info for BaseInfo {
 
     fn dist_count(&self) -> usize {
         self.dist_vec.count_ones()
+    }
+
+    fn sub_info(&self) -> Self {
+        Self::new(self.dist_vec.len())
+    }
+
+    fn consume(&mut self, other: Self) {
+        self.hits += other.hits;
+        self.miss += other.miss;
+        self.scan_map.extend(other.scan_map);
+        self.dist_vec |= other.dist_vec;
     }
 
     fn clear(&mut self) {

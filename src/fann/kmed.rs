@@ -157,8 +157,78 @@ impl Node {
             center_dist,
         });
         self.children
-            .sort_unstable_by(|a, b| a.center_dist.cmp(&b.center_dist).reverse());
+            .par_sort_unstable_by(|a, b| a.center_dist.cmp(&b.center_dist).reverse());
     }
+
+    // fn par_get_closest<'a, E, D, T, I>(
+    //     &self,
+    //     res: &mut Vec<(usize, DistanceCmp)>,
+    //     own_dist: DistanceCmp,
+    //     count: usize,
+    //     ldist: &LocalDistance<'a, E, D, T>,
+    //     info: &mut I,
+    // ) where
+    //     E: EmbeddingProvider<'a, D, T>,
+    //     D: Distance<T> + Copy,
+    //     T: 'a,
+    //     I: Info,
+    // {
+    //     fn max_dist(res: &Vec<(usize, DistanceCmp)>, count: usize) -> DistanceCmp {
+    //         let index = count.min(res.len()) - 1;
+    //         res[index].1
+    //     }
+
+    //     fn add_node(
+    //         res: &mut Vec<(usize, DistanceCmp)>,
+    //         node: &Node,
+    //         distance: DistanceCmp,
+    //         count: usize,
+    //     ) {
+    //         let element = (node.centroid_index, distance);
+    //         let mindex = res.binary_search_by(|&(_, dist)| dist.cmp(&distance));
+    //         match mindex {
+    //             Ok(index) => res.insert(index, element),
+    //             Err(index) => res.insert(index, element),
+    //         }
+    //         res.truncate(count);
+    //     }
+
+    //     if res.len() < count || own_dist < max_dist(res, count) {
+    //         add_node(res, self, own_dist, count);
+    //     }
+    //     let is_outer = self.radius < own_dist;
+    //     info.log_scan(self.centroid_index, is_outer);
+    //     if is_outer {
+    //         for child in self.children.iter() {
+    //             let c_dist_est = own_dist.combine(&child.center_dist, |own, center| own - center);
+    //             if max_dist(res, count) < c_dist_est {
+    //                 continue;
+    //             }
+    //             let cdist = child.node.get_dist(ldist, info);
+    //             child.node.get_closest(res, cdist, count, ldist, info);
+    //         }
+    //     } else {
+    //         let mut inners: Vec<(&Node, DistanceCmp, DistanceCmp, I)> = self
+    //             .children
+    //             .iter()
+    //             .map(|child| (child, info.sub_info()))
+    //             .par_iter()
+    //             .map(|(child, sinfo)| {
+    //                 let cdist = child.node.get_dist(ldist, &mut sinfo);
+    //                 let cmin = child.node.get_dist_min(&cdist);
+    //                 (&child.node, cdist, cmin, sinfo)
+    //             })
+    //             .collect();
+    //         inners.par_sort_unstable_by(|(_, _, dist_a, _), (_, _, dist_b, _)| dist_a.cmp(dist_b));
+    //         for (cnode, cdist, cmin, sinfo) in inners.into_iter() {
+    //             info.consume(sinfo);
+    //             if max_dist(res, count) < cmin {
+    //                 continue;
+    //             }
+    //             cnode.get_closest(res, cdist, count, ldist, info);
+    //         }
+    //     }
+    // }
 
     fn get_closest<'a, E, D, T, I>(
         &self,
@@ -217,7 +287,7 @@ impl Node {
                     (&child.node, cdist, cmin)
                 })
                 .collect();
-            inners.sort_unstable_by(|(_, _, dist_a), (_, _, dist_b)| dist_a.cmp(dist_b));
+            inners.par_sort_unstable_by(|(_, _, dist_a), (_, _, dist_b)| dist_a.cmp(dist_b));
             for (cnode, cdist, cmin) in inners.into_iter() {
                 if max_dist(res, count) < cmin {
                     continue;
@@ -360,6 +430,65 @@ impl FannTree {
         cache.cached_distance(embed_a, embed_b, provider.distance(), info)
     }
 
+    fn par_centroid<'a, E, D, T, C, I>(
+        provider: &'a E,
+        all_ixs: &Vec<usize>,
+        cache: &mut C,
+        info: &mut I,
+    ) -> usize
+    where
+        E: EmbeddingProvider<'a, D, T>,
+        D: Distance<T> + Copy,
+        T: 'a,
+        C: Cache,
+        I: Info + Send,
+    {
+        let (res_ix, _, sinfo): (Option<usize>, DistanceCmp, I) = all_ixs
+            .par_iter()
+            .fold(
+                || (None, DistanceCmp::of(f64::INFINITY), info.sub_info()),
+                |best, &ix| {
+                    let (best_ix, best_dist, sinfo) = best;
+                    let embed = provider.get(ix);
+                    let cur_dist: DistanceCmp = all_ixs
+                        .par_iter()
+                        .fold(
+                            || DistanceCmp::zero(),
+                            |res, &oix| {
+                                if oix == ix || res > best_dist {
+                                    res
+                                } else {
+                                    let oembed = provider.get(oix);
+                                    res.combine(
+                                        &Self::get_dist(
+                                            provider, &embed, &oembed, cache, &mut sinfo,
+                                        ),
+                                        |cur, dist| cur + dist,
+                                    )
+                                }
+                            },
+                        )
+                        .reduce(|| DistanceCmp::of(f64::INFINITY), |a, b| {});
+                    if best_ix.is_none() || cur_dist < best_dist {
+                        (Some(ix), cur_dist, sinfo)
+                    } else {
+                        best
+                    }
+                },
+            )
+            .reduce(
+                || (None, DistanceCmp::of(f64::INFINITY), info.sub_info()),
+                |a, b| {
+                    let (abest_ix, abest_dist, ainfo) = a;
+                    let (bbest_ix, bbest_dist, binfo) = b;
+
+                    ainfo.consume(binfo);
+                    (abest_ix, abest_dist, ainfo)
+                },
+            );
+        res_ix.unwrap()
+    }
+
     fn centroid<'a, E, D, T, C, I>(
         provider: &'a E,
         all_ixs: &Vec<usize>,
@@ -373,7 +502,7 @@ impl FannTree {
         C: Cache,
         I: Info,
     {
-        let (res_ix, _) =
+        let (res_ix, _): (Option<usize>, DistanceCmp) =
             all_ixs
                 .iter()
                 .fold((None, DistanceCmp::of(f64::INFINITY)), |best, &ix| {
@@ -399,6 +528,77 @@ impl FannTree {
                 });
         res_ix.unwrap()
     }
+
+    // fn par_kmedoid<'a, E, D, T, C, I>(
+    //     provider: &'a E,
+    //     all_ixs: Vec<usize>,
+    //     init_centroids: Option<Vec<usize>>,
+    //     k_num: usize,
+    //     cache: &mut C,
+    //     info: &mut I,
+    // ) -> Vec<(usize, Vec<usize>)>
+    // where
+    //     E: EmbeddingProvider<'a, D, T>,
+    //     D: Distance<T> + Copy,
+    //     T: 'a,
+    //     C: Cache,
+    //     I: Info,
+    // {
+    //     if all_ixs.len() <= k_num {
+    //         return all_ixs.iter().map(|&ix| (ix, Vec::new())).collect();
+    //     }
+    //     let buff_size = 10;
+    //     let mut rounds = 1000;
+    //     let mut buff: VecDeque<Vec<usize>> = VecDeque::with_capacity(buff_size);
+    //     if let Some(init_centroids) = init_centroids {
+    //         buff.push_front(init_centroids);
+    //     } else {
+    //         buff.push_front(all_ixs[..k_num].to_vec());
+    //     }
+    //     let mut done = false;
+    //     loop {
+    //         let centroids: Vec<usize> = buff.get(0).unwrap().clone();
+    //         let mut res: Vec<(usize, Vec<usize>)> =
+    //             centroids.iter().map(|&ix| (ix, Vec::from([ix]))).collect();
+    //         all_ixs
+    //             .par_iter()
+    //             .filter(|&ix| !centroids.contains(ix))
+    //             .for_each(|&ix| {
+    //                 let embed = provider.get(ix);
+    //                 let (_, best) = res
+    //                     .iter_mut()
+    //                     .min_by(|(a, _), (b, _)| {
+    //                         let dist_a =
+    //                             Self::get_dist(provider, &embed, &provider.get(*a), cache, info);
+    //                         let dist_b =
+    //                             Self::get_dist(provider, &embed, &provider.get(*b), cache, info);
+    //                         dist_a.cmp(&dist_b)
+    //                     })
+    //                     .unwrap();
+    //                 best.push(ix);
+    //             });
+    //         if done {
+    //             return res;
+    //         }
+    //         rounds -= 1;
+    //         if rounds <= 0 {
+    //             eprintln!("exhausted iteration steps");
+    //             return res;
+    //         }
+    //         let new_cs: Vec<usize> = res
+    //             .par_iter()
+    //             .map(|(_, assignments)| Self::centroid(provider, assignments, cache, info))
+    //             .collect();
+    //         if buff.par_iter().any(|old_cs| *old_cs == new_cs) {
+    //             // TODO use par for actually useful things
+    //             done = true;
+    //         }
+    //         while buff.len() >= buff_size {
+    //             buff.pop_back();
+    //         }
+    //         buff.push_front(new_cs.clone());
+    //     }
+    // }
 
     fn kmedoid<'a, E, D, T, C, I>(
         provider: &'a E,
@@ -460,8 +660,7 @@ impl FannTree {
                 .iter()
                 .map(|(_, assignments)| Self::centroid(provider, assignments, cache, info))
                 .collect();
-            if buff.par_iter().any(|old_cs| *old_cs == new_cs) {
-                // TODO use par for actually useful things
+            if buff.iter().any(|old_cs| *old_cs == new_cs) {
                 done = true;
             }
             while buff.len() >= buff_size {
