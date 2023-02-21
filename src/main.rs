@@ -29,8 +29,6 @@ struct Args {
     file: String,
     #[arg(short, long, default_value_t = 1000)]
     total: usize,
-    #[arg(short, long)]
-    precluster: Option<usize>,
     #[arg(long, default_value_t = false)]
     force: bool,
     #[arg(short, long, default_value_t = false)]
@@ -40,10 +38,9 @@ struct Args {
 fn main() {
     let args = Args::parse();
     let total_size = args.total;
-    let pre_cluster = args.precluster;
     let force = args.force;
     let print_info = args.info;
-    println!("size: {} pre_cluster: {:?}", total_size, pre_cluster);
+    println!("size: {}", total_size);
 
     let t_load = Instant::now();
     let df = load_embed(args.file.as_str());
@@ -70,7 +67,7 @@ fn main() {
         println!("load took {:?}", t_build.elapsed());
     } else {
         let mut cache = DistanceCache::new(100000);
-        fann.build(None, pre_cluster, &mut cache, &mut info);
+        fann.build(None, &mut cache, &mut info);
         fann.get_tree()
             .as_ref()
             .unwrap()

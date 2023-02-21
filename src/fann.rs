@@ -25,7 +25,6 @@ where
     fn build<C, I>(
         provider: &'a E,
         max_node_size: Option<usize>,
-        pre_cluster: Option<usize>,
         cache: &mut C,
         info: &mut I,
     ) -> Self
@@ -111,23 +110,12 @@ where
         self.root = None;
     }
 
-    pub fn build<C, I>(
-        &mut self,
-        max_node_size: Option<usize>,
-        pre_cluster: Option<usize>,
-        cache: &mut C,
-        info: &mut I,
-    ) where
+    pub fn build<C, I>(&mut self, max_node_size: Option<usize>, cache: &mut C, info: &mut I)
+    where
         C: Cache,
         I: Info,
     {
-        self.root = Some(N::build(
-            self.provider,
-            max_node_size,
-            pre_cluster,
-            cache,
-            info,
-        ));
+        self.root = Some(N::build(self.provider, max_node_size, cache, info));
     }
 
     pub fn draw<I>(

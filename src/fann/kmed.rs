@@ -482,7 +482,6 @@ impl FannTree {
         cur_root_ix: usize,
         cur_all_ixs: Vec<usize>,
         max_node_size: usize,
-        pre_cluster: Option<usize>,
     ) -> Node
     where
         E: EmbeddingProvider<'a, D, T>,
@@ -504,33 +503,7 @@ impl FannTree {
                 node.add_child(cnode, provider, cache, info);
             });
         } else {
-            // TODO pre_cluster makes things slower
-            let init_centroids = match pre_cluster {
-                Some(pre_cluster) => {
-                    if cur_all_ixs.len() <= pre_cluster * num_k * 2 {
-                        None
-                    } else {
-                        Some(
-                            Self::kmedoid(
-                                provider,
-                                cur_all_ixs
-                                    .iter()
-                                    .take(pre_cluster * num_k)
-                                    .map(|&cix| cix)
-                                    .collect(),
-                                None,
-                                num_k,
-                                cache,
-                                info,
-                            )
-                            .into_iter()
-                            .map(|(cix, _)| cix)
-                            .collect(),
-                        )
-                    }
-                }
-                None => None,
-            };
+            let init_centroids = None;
             Self::kmedoid(provider, cur_all_ixs, init_centroids, num_k, cache, info)
                 .into_iter()
                 .for_each(|(centroid_ix, mut assignments)| {
@@ -542,7 +515,6 @@ impl FannTree {
                         centroid_ix,
                         assignments,
                         max_node_size,
-                        pre_cluster,
                     );
                     node.add_child(child_node, provider, cache, info);
                 });
@@ -578,7 +550,6 @@ where
     fn build<C, I>(
         provider: &'a E,
         max_node_size: Option<usize>,
-        pre_cluster: Option<usize>,
         cache: &mut C,
         info: &mut I,
     ) -> Self
@@ -595,15 +566,7 @@ where
 
         Self::remove(&mut all_ixs, root_ix);
         Self {
-            root: Self::build_level(
-                provider,
-                cache,
-                info,
-                root_ix,
-                all_ixs,
-                max_node_size,
-                pre_cluster,
-            ),
+            root: Self::build_level(provider, cache, info, root_ix, all_ixs, max_node_size),
             hash: provider.compute_hash(),
             distance_name: provider.distance().name().to_string(),
         }
