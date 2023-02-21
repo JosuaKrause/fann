@@ -1,4 +1,3 @@
-use rayon::prelude::*;
 use serde::{self, Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
@@ -460,8 +459,7 @@ impl FannTree {
                 .iter()
                 .map(|(_, assignments)| Self::centroid(provider, assignments, cache, info))
                 .collect();
-            if buff.par_iter().any(|old_cs| *old_cs == new_cs) {
-                // TODO use par for actually useful things
+            if buff.iter().any(|old_cs| *old_cs == new_cs) {
                 done = true;
             }
             while buff.len() >= buff_size {
