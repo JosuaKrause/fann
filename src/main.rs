@@ -1,7 +1,7 @@
 use clap::{arg, Parser};
 use fann::distances::vec::{VecProvider, VEC_DOT_DISTANCE};
 use fann::info::{no_info, BaseInfo, Info};
-use fann::kmed::FannTree;
+use fann::kmed::{FannBuildParams, FannTree};
 use std::time::Instant;
 
 use fann::cache::DistanceCache;
@@ -10,7 +10,7 @@ use polars::io::prelude::*;
 use polars::prelude::Float64Type;
 
 use fann::distances::ndarray::{NdProvider, ND_DOT_DISTANCE};
-use fann::{Embedding, EmbeddingProvider, Fann, NearestNeighbors};
+use fann::{Embedding, EmbeddingProvider, FannForest, Forest, NearestNeighbors};
 
 fn load_embed(path: &str) -> Array2<f64> {
     let mut file = std::fs::File::open(path).unwrap();
@@ -27,6 +27,10 @@ fn to_vec_vec(arr: ArrayView2<f64>) -> Vec<Vec<f64>> {
 struct Args {
     #[arg(short, long, default_value_t = String::from("embeds.pq"))]
     file: String,
+    #[arg(short, long, default_value_t = 10)]
+    min_tree: usize,
+    #[arg(short, long, default_value_t = 1000)]
+    max_tree: usize,
     #[arg(short, long, default_value_t = 1000)]
     total: usize,
     #[arg(long, default_value_t = false)]
@@ -37,6 +41,8 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
+    let min_tree = args.min_tree;
+    let max_tree = args.max_tree;
     let total_size = args.total;
     let force = args.force;
     let print_info = args.info;
@@ -53,43 +59,39 @@ fn main() {
     let vv_provider = VecProvider::new(&vv, VEC_DOT_DISTANCE);
 
     println!("{size:?}", size = provider.all());
+    let main_provider = provider.subrange(0..total_size).unwrap();
 
-    let mut fann = Fann::new(&provider);
     let t_build = Instant::now();
     let tfilename = format!("tree-{}.zip", total_size);
     let tfile = std::path::Path::new(&tfilename);
-    if !force && tfile.exists() {
-        fann.set_tree(
-            FannTree::load(&std::fs::File::open(tfile).unwrap()).unwrap(),
-            false,
-        )
-        .unwrap();
-        println!("load took {:?}", t_build.elapsed());
+    let mut cache = DistanceCache::new(1000000);
+    let params = FannBuildParams {
+        max_node_size: None,
+    };
+    let mut forest: FannForest<_, FannTree, _, _, _> =
+        FannForest::create(&main_provider, min_tree, max_tree);
+    if tfile.exists() {
+        let mut file = std::fs::File::open(tfile).unwrap();
+        forest.load_all(&mut file, false, &params, &mut cache, &mut info, force);
     } else {
-        let mut cache = DistanceCache::new(100000);
-        fann.build(None, &mut cache, &mut info);
-        fann.get_tree()
-            .as_ref()
-            .unwrap()
-            .save(&std::fs::File::create(tfile).unwrap())
-            .unwrap();
-        println!("build took {:?}", t_build.elapsed());
-        let (hits, miss) = info.cache_hits_miss();
-        println!(
-            "cache[rate: {:.2}% hits: {} miss: {} total: {}]",
-            info.cache_hit_rate() * 100.0,
-            hits,
-            miss,
-            hits + miss,
-        );
-        info.clear();
+        forest.build_all(&params, &mut cache, &mut info);
     }
+    println!("build took {:?}", t_build.elapsed());
+    let (hits, miss) = info.cache_hits_miss();
+    println!(
+        "cache[rate: {:.2}% hits: {} miss: {} total: {}]",
+        info.cache_hit_rate() * 100.0,
+        hits,
+        miss,
+        hits + miss,
+    );
+    info.clear();
 
     let embed_v = df.row(total_size);
     let embed = Embedding::as_embedding(embed_v);
 
     let t_search = Instant::now();
-    let closest = fann.get_closest(&embed, 10, &mut info);
+    let closest = forest.get_closest(&embed, 10, &mut info);
     println!("search took {:?}", t_search.elapsed());
     println!("{:?}", closest);
 
@@ -97,7 +99,12 @@ fn main() {
     if print_info {
         println!(
             "{draw}",
-            draw = fann.draw(Some(&info), Some(closest), true, false)
+            draw =
+                forest
+                    .get_trees()
+                    .first()
+                    .unwrap()
+                    .draw(Some(&info), Some(closest), true, false)
         );
     }
 

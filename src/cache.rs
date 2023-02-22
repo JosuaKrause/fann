@@ -26,10 +26,10 @@ impl Cache for DistanceCache {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct NoCache {}
+pub struct NoCache;
 
 pub fn no_cache() -> NoCache {
-    NoCache {}
+    NoCache
 }
 
 impl Cache for NoCache {

@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{fmt, marker::PhantomData};
 
 use blake2::Blake2s256;
 use digest::Digest;
@@ -69,15 +69,29 @@ impl<T> Embedding<T> {
     }
 }
 
-pub trait Distance<T> {
+pub trait Distance<T>
+where
+    Self: Copy,
+{
     fn distance_cmp(&self, a: &Embedding<T>, b: &Embedding<T>) -> DistanceCmp;
     fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64;
     fn name(&self) -> &str;
 }
 
+#[derive(Debug, Clone)]
+pub struct InvalidRangeError;
+
+impl fmt::Display for InvalidRangeError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "given range is invalid")
+    }
+}
+
 pub trait EmbeddingProvider<'a, D, T>
 where
-    D: Distance<T> + Copy,
+    D: Distance<T>,
+    Self: Sized + 'a,
+    T: 'a,
 {
     fn get_embed(&'a self, index: usize) -> T;
     fn all(&self) -> std::ops::Range<usize>;
@@ -100,6 +114,8 @@ where
             .for_each(|ix| self.hash_embed(ix, &mut hasher));
         format!("{hash:x}", hash = hasher.finalize())
     }
+
+    fn subrange(&'a self, new_range: std::ops::Range<usize>) -> Result<Self, InvalidRangeError>;
 }
 
 #[derive(Hash, Eq, PartialEq, Debug)]
@@ -165,7 +181,7 @@ pub trait Cache {
         info: &mut I,
     ) -> DistanceCmp
     where
-        D: Distance<T> + Copy,
+        D: Distance<T>,
         T: 'a,
         I: Info,
     {
@@ -178,7 +194,7 @@ pub trait Cache {
 pub struct LocalDistance<'a, E, D, T>
 where
     E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T> + Copy,
+    D: Distance<T>,
     T: 'a,
 {
     provider: &'a E,
@@ -189,7 +205,7 @@ where
 impl<'a, E, D, T> LocalDistance<'a, E, D, T>
 where
     E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T> + Copy,
+    D: Distance<T>,
     T: 'a,
 {
     pub fn new(provider: &'a E, embed: &'a Embedding<T>) -> Self {
@@ -220,7 +236,7 @@ where
     T: 'a,
 {
     fn get_closest<I>(
-        &self,
+        &'a self,
         other: &'a Embedding<T>,
         count: usize,
         info: &mut I,

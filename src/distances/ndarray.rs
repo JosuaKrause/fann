@@ -1,12 +1,15 @@
 use digest::Digest;
-use ndarray::{Array1, ArrayView1, ArrayView2};
+use ndarray::{s, Array1, ArrayView1, ArrayView2};
 
-use crate::{info::Info, Distance, DistanceCmp, Embedding, EmbeddingProvider, NearestNeighbors};
+use crate::{
+    info::Info, Distance, DistanceCmp, Embedding, EmbeddingProvider, InvalidRangeError,
+    NearestNeighbors,
+};
 
 #[derive(Debug, Clone, Copy)]
-pub struct NdDotDistance {}
+pub struct NdDotDistance;
 
-pub const ND_DOT_DISTANCE: NdDotDistance = NdDotDistance {};
+pub const ND_DOT_DISTANCE: NdDotDistance = NdDotDistance;
 
 impl<'a> Distance<ArrayView1<'a, f64>> for NdDotDistance {
     fn distance_cmp(
@@ -27,9 +30,9 @@ impl<'a> Distance<ArrayView1<'a, f64>> for NdDotDistance {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct NdL2Distance {}
+pub struct NdL2Distance;
 
-pub const ND_L2_DISTANCE: NdL2Distance = NdL2Distance {};
+pub const ND_L2_DISTANCE: NdL2Distance = NdL2Distance;
 
 impl<'a> Distance<ArrayView1<'a, f64>> for NdL2Distance {
     fn distance_cmp(
@@ -56,6 +59,7 @@ where
     D: Distance<ArrayView1<'a, f64>>,
 {
     arr: ArrayView2<'a, f64>,
+    offset: usize,
     distance: D,
 }
 
@@ -64,20 +68,25 @@ where
     D: Distance<ArrayView1<'a, f64>>,
 {
     pub fn new(arr: ArrayView2<'a, f64>, distance: D) -> Self {
-        NdProvider { arr, distance }
+        NdProvider {
+            arr,
+            offset: 0,
+            distance,
+        }
     }
 }
 
 impl<'a, D> EmbeddingProvider<'a, D, ArrayView1<'a, f64>> for NdProvider<'a, D>
 where
-    D: Distance<ArrayView1<'a, f64>> + Copy,
+    D: Distance<ArrayView1<'a, f64>>,
+    Self: 'a,
 {
     fn get_embed(&'a self, index: usize) -> ArrayView1<'a, f64> {
-        self.arr.row(index)
+        self.arr.row(index - self.offset)
     }
 
     fn all(&self) -> std::ops::Range<usize> {
-        0..self.arr.shape()[0]
+        self.offset..(self.arr.shape()[0] + self.offset)
     }
 
     fn distance(&self) -> D {
@@ -89,9 +98,26 @@ where
         H: Digest,
     {
         self.arr
-            .row(index)
+            .row(index - self.offset)
             .iter()
             .for_each(|v| hasher.update(v.to_be_bytes()));
+    }
+
+    fn subrange(
+        &'a self,
+        new_range: std::ops::Range<usize>,
+    ) -> Result<Self, crate::InvalidRangeError> {
+        let all = self.all();
+        if new_range.start < all.start || new_range.end > all.end {
+            return Err(InvalidRangeError);
+        }
+        let tmp_range = (new_range.start - all.start)..(new_range.end - all.start);
+        let new_offset = new_range.start;
+        Ok(Self {
+            arr: self.arr.slice(s![tmp_range, ..]),
+            offset: new_offset,
+            distance: self.distance,
+        })
     }
 }
 

@@ -21,10 +21,10 @@ pub trait Info {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct NoInfo {}
+pub struct NoInfo;
 
 pub fn no_info() -> NoInfo {
-    NoInfo {}
+    NoInfo
 }
 
 impl Info for NoInfo {

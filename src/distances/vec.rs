@@ -1,10 +1,13 @@
-use crate::{info::Info, Distance, DistanceCmp, Embedding, EmbeddingProvider, NearestNeighbors};
+use crate::{
+    info::Info, Distance, DistanceCmp, Embedding, EmbeddingProvider, InvalidRangeError,
+    NearestNeighbors,
+};
 use digest::Digest;
 
 #[derive(Debug, Clone, Copy)]
-pub struct VecDotDistance {}
+pub struct VecDotDistance;
 
-pub const VEC_DOT_DISTANCE: VecDotDistance = VecDotDistance {};
+pub const VEC_DOT_DISTANCE: VecDotDistance = VecDotDistance;
 
 impl Distance<&Vec<f64>> for VecDotDistance {
     fn distance_cmp(&self, a: &Embedding<&Vec<f64>>, b: &Embedding<&Vec<f64>>) -> DistanceCmp {
@@ -27,9 +30,9 @@ impl Distance<&Vec<f64>> for VecDotDistance {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct VecL2Distance {}
+pub struct VecL2Distance;
 
-pub const VEC_L2_DISTANCE: VecL2Distance = VecL2Distance {};
+pub const VEC_L2_DISTANCE: VecL2Distance = VecL2Distance;
 
 impl Distance<&Vec<f64>> for VecL2Distance {
     fn distance_cmp(&self, a: &Embedding<&Vec<f64>>, b: &Embedding<&Vec<f64>>) -> DistanceCmp {
@@ -56,6 +59,7 @@ where
     D: Distance<&'a Vec<f64>>,
 {
     embeddings: &'a Vec<Vec<f64>>,
+    range: std::ops::Range<usize>,
     distance: D,
 }
 
@@ -66,6 +70,7 @@ where
     pub fn new(embeddings: &'a Vec<Vec<f64>>, distance: D) -> Self {
         VecProvider {
             embeddings,
+            range: 0..embeddings.len(),
             distance,
         }
     }
@@ -73,14 +78,16 @@ where
 
 impl<'a, D> EmbeddingProvider<'a, D, &'a Vec<f64>> for VecProvider<'a, D>
 where
-    D: Distance<&'a Vec<f64>> + Copy,
+    D: Distance<&'a Vec<f64>>,
+    Self: 'a,
 {
     fn get_embed(&'a self, index: usize) -> &'a Vec<f64> {
+        assert!(self.range.contains(&index));
         &self.embeddings[index]
     }
 
     fn all(&self) -> std::ops::Range<usize> {
-        0..self.embeddings.len()
+        self.range.clone()
     }
 
     fn distance(&self) -> D {
@@ -91,9 +98,21 @@ where
     where
         H: Digest,
     {
+        assert!(self.range.contains(&index));
         self.embeddings[index]
             .iter()
             .for_each(|v| hasher.update(v.to_be_bytes()));
+    }
+
+    fn subrange(&'a self, new_range: std::ops::Range<usize>) -> Result<Self, InvalidRangeError> {
+        if new_range.start < self.range.start || new_range.end > self.range.end {
+            return Err(InvalidRangeError);
+        }
+        Ok(Self {
+            embeddings: self.embeddings,
+            range: new_range,
+            distance: self.distance,
+        })
     }
 }
 

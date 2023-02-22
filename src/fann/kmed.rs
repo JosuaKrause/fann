@@ -3,47 +3,11 @@ use std::{
     collections::{HashMap, VecDeque},
     iter::repeat,
 };
-use zip::{result::ZipError, write::FileOptions};
 
 use crate::{
-    info::Info, Cache, Distance, DistanceCmp, Embedding, EmbeddingProvider, LocalDistance, Tree,
+    info::Info, BuildParams, Cache, Distance, DistanceCmp, Embedding, EmbeddingProvider,
+    LocalDistance, Tree,
 };
-
-#[derive(Debug)]
-pub enum TreeLoadError {
-    ZipError(ZipError),
-    SerdeError(serde_json::Error),
-}
-
-impl From<ZipError> for TreeLoadError {
-    fn from(value: ZipError) -> Self {
-        TreeLoadError::ZipError(value)
-    }
-}
-
-impl From<serde_json::Error> for TreeLoadError {
-    fn from(value: serde_json::Error) -> Self {
-        TreeLoadError::SerdeError(value)
-    }
-}
-
-#[derive(Debug)]
-pub enum TreeWriteError {
-    ZipError(ZipError),
-    SerdeError(serde_json::Error),
-}
-
-impl From<ZipError> for TreeWriteError {
-    fn from(value: ZipError) -> Self {
-        TreeWriteError::ZipError(value)
-    }
-}
-
-impl From<serde_json::Error> for TreeWriteError {
-    fn from(value: serde_json::Error) -> Self {
-        TreeWriteError::SerdeError(value)
-    }
-}
 
 const HIGHLIGHT_A: &str = "*";
 const HIGHLIGHT_B: &str = ":";
@@ -74,7 +38,7 @@ impl Node {
     fn get_embed<'a, E, D, T>(&self, provider: &'a E) -> Embedding<T>
     where
         E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
+        D: Distance<T>,
         T: 'a,
     {
         provider.get(self.centroid_index)
@@ -93,7 +57,7 @@ impl Node {
     ) -> DistanceCmp
     where
         E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
+        D: Distance<T>,
         T: 'a,
         C: Cache,
         I: Info,
@@ -109,7 +73,7 @@ impl Node {
     ) -> DistanceCmp
     where
         E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
+        D: Distance<T>,
         T: 'a,
         I: Info,
     {
@@ -145,7 +109,7 @@ impl Node {
         info: &mut I,
     ) where
         E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
+        D: Distance<T>,
         T: 'a,
         C: Cache,
         I: Info,
@@ -168,7 +132,7 @@ impl Node {
         info: &mut I,
     ) where
         E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
+        D: Distance<T>,
         T: 'a,
         I: Info,
     {
@@ -351,7 +315,7 @@ impl FannTree {
     ) -> DistanceCmp
     where
         E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
+        D: Distance<T>,
         T: 'a,
         C: Cache,
         I: Info,
@@ -367,7 +331,7 @@ impl FannTree {
     ) -> usize
     where
         E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
+        D: Distance<T>,
         T: 'a,
         C: Cache,
         I: Info,
@@ -409,7 +373,7 @@ impl FannTree {
     ) -> Vec<(usize, Vec<usize>)>
     where
         E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
+        D: Distance<T>,
         T: 'a,
         C: Cache,
         I: Info,
@@ -483,7 +447,7 @@ impl FannTree {
     ) -> Node
     where
         E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
+        D: Distance<T>,
         T: 'a,
         C: Cache,
         I: Info,
@@ -520,43 +484,27 @@ impl FannTree {
         node.compute_radius();
         node
     }
-
-    pub fn load(file: &std::fs::File) -> Result<Self, TreeLoadError> {
-        let mut archive = zip::ZipArchive::new(file)?;
-        let zip_file = archive.by_name("tree.json")?;
-        let res: Self = serde_json::from_reader(zip_file)?;
-        Ok(res)
-    }
-
-    pub fn save(&self, file: &std::fs::File) -> Result<(), TreeWriteError> {
-        let mut zip = zip::ZipWriter::new(file);
-        let options = FileOptions::default()
-            .compression_method(zip::CompressionMethod::Bzip2)
-            .unix_permissions(0o755);
-        zip.start_file("tree.json", options)?;
-        serde_json::to_writer(zip, self)?;
-        Ok(())
-    }
 }
 
-impl<'a, E, D, T> Tree<'a, E, D, T> for FannTree
+pub struct FannBuildParams {
+    pub max_node_size: Option<usize>,
+}
+
+impl BuildParams for FannBuildParams {}
+
+impl<'a, E, D, T> Tree<'a, FannBuildParams, E, D, T> for FannTree
 where
     E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T> + Copy,
+    D: Distance<T>,
     T: 'a,
 {
-    fn build<C, I>(
-        provider: &'a E,
-        max_node_size: Option<usize>,
-        cache: &mut C,
-        info: &mut I,
-    ) -> Self
+    fn build<C, I>(provider: &'a E, params: &FannBuildParams, cache: &mut C, info: &mut I) -> Self
     where
         C: Cache,
         I: Info,
     {
         let mut all_ixs: Vec<usize> = provider.all().collect();
-        let max_node_size = match max_node_size {
+        let max_node_size = match params.max_node_size {
             Some(max_node_size) => max_node_size,
             None => all_ixs.len(),
         };
