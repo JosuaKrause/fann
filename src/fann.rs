@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
 use crate::{
-    info::Info, BuildParams, Buildable, Cache, Distance, Embedding, EmbeddingProvider, Forest,
-    LocalDistance, NearestNeighbors, Tree,
+    info::Info, BuildParams, Buildable, Cache, Distance, EmbeddingProvider, Forest, LocalDistance,
+    NearestNeighbors, Tree,
 };
 
 pub mod kmed;
@@ -13,7 +13,7 @@ where
     N: Tree<'a, P, E, D, T>,
     E: EmbeddingProvider<'a, D, T>,
     D: Distance<T>,
-    T: 'a,
+    T: 'a + Copy,
 {
     provider: E,
     root: Option<N>,
@@ -30,7 +30,7 @@ where
     N: Tree<'a, P, E, D, T>,
     E: EmbeddingProvider<'a, D, T>,
     D: Distance<T>,
-    T: 'a,
+    T: 'a + Copy,
 {
     pub fn new(provider: E) -> Fann<'a, P, N, E, D, T> {
         Fann {
@@ -64,20 +64,15 @@ where
     }
 }
 
-impl<'a, P, N, E, D, T> NearestNeighbors<'a, T> for Fann<'a, P, N, E, D, T>
+impl<'a, P, N, E, D, T> NearestNeighbors<'a, E, D, T> for Fann<'a, P, N, E, D, T>
 where
     P: BuildParams,
     N: Tree<'a, P, E, D, T>,
     E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T>,
-    T: 'a,
+    D: Distance<T> + Copy,
+    T: 'a + Copy,
 {
-    fn get_closest<I>(
-        &'a self,
-        other: &'a Embedding<T>,
-        count: usize,
-        info: &mut I,
-    ) -> Vec<(usize, f64)>
+    fn get_closest<I>(&'a self, other: T, count: usize, info: &mut I) -> Vec<(usize, f64)>
     where
         I: Info,
     {
@@ -95,7 +90,7 @@ where
     N: Tree<'a, P, E, D, T>,
     E: EmbeddingProvider<'a, D, T>,
     D: Distance<T>,
-    T: 'a,
+    T: 'a + Copy,
 {
     fn build<C, I>(&'a mut self, params: &P, cache: &mut C, info: &mut I)
     where
@@ -136,9 +131,9 @@ pub struct FannForest<'a, P, N, E, D, T>
 where
     P: BuildParams,
     N: Tree<'a, P, E, D, T>,
-    E: EmbeddingProvider<'a, D, T> + NearestNeighbors<'a, T>,
+    E: EmbeddingProvider<'a, D, T> + NearestNeighbors<'a, E, D, T>,
     D: Distance<T>,
-    T: 'a,
+    T: 'a + Copy,
 {
     trees: Vec<Fann<'a, P, N, E, D, T>>,
     remain: E,
@@ -150,9 +145,9 @@ impl<'a, P, N, E, D, T> Forest<'a, P, N, E, D, T, Fann<'a, P, N, E, D, T>>
 where
     P: BuildParams,
     N: Tree<'a, P, E, D, T>,
-    E: EmbeddingProvider<'a, D, T> + NearestNeighbors<'a, T>,
+    E: EmbeddingProvider<'a, D, T> + NearestNeighbors<'a, E, D, T>,
     D: Distance<T>,
-    T: 'a,
+    T: 'a + Copy,
     Self: 'a,
 {
     fn create_from(trees: Vec<Fann<'a, P, N, E, D, T>>, remain: E) -> Self {
@@ -167,11 +162,11 @@ where
         Fann::new(provider)
     }
 
-    fn get_trees(&'a self) -> &'a Vec<Fann<'a, P, N, E, D, T>> {
+    fn get_trees(&self) -> &Vec<Fann<'a, P, N, E, D, T>> {
         &self.trees
     }
 
-    fn get_trees_mut(&'a mut self) -> &'a mut Vec<Fann<'a, P, N, E, D, T>> {
+    fn get_trees_mut(&mut self) -> &mut Vec<Fann<'a, P, N, E, D, T>> {
         &mut self.trees
     }
 

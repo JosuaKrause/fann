@@ -6,7 +6,7 @@ use polars::export::num::ToPrimitive;
 pub trait Info {
     fn log_cache_access(&mut self, is_miss: bool);
     fn log_scan(&mut self, index: usize, is_outer: bool);
-    fn log_dist(&mut self, index: &Option<usize>);
+    fn log_dist(&mut self, index: usize);
 
     fn cache_hits_miss(&self) -> (u64, u64);
     fn cache_hit_rate(&self) -> f64 {
@@ -30,7 +30,7 @@ pub fn no_info() -> NoInfo {
 impl Info for NoInfo {
     fn log_cache_access(&mut self, _is_miss: bool) {}
     fn log_scan(&mut self, _index: usize, _is_outer: bool) {}
-    fn log_dist(&mut self, _index: &Option<usize>) {}
+    fn log_dist(&mut self, _index: usize) {}
 
     fn cache_hits_miss(&self) -> (u64, u64) {
         (0, 0)
@@ -84,10 +84,8 @@ impl Info for BaseInfo {
         };
     }
 
-    fn log_dist(&mut self, index: &Option<usize>) {
-        if let Some(ix) = index {
-            self.dist_vec.set(*ix, true);
-        }
+    fn log_dist(&mut self, index: usize) {
+        self.dist_vec.set(index, true);
     }
 
     fn cache_hits_miss(&self) -> (u64, u64) {

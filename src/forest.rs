@@ -1,8 +1,6 @@
 use std::fmt;
 
-use crate::{
-    info::Info, Cache, Distance, Embedding, EmbeddingProvider, LocalDistance, NearestNeighbors,
-};
+use crate::{info::Info, Cache, Distance, EmbeddingProvider, LocalDistance, NearestNeighbors};
 use rayon::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
 use zip::{result::ZipError, write::FileOptions};
@@ -82,7 +80,7 @@ where
     P: BuildParams,
     E: EmbeddingProvider<'a, D, T>,
     D: Distance<T>,
-    T: 'a,
+    T: 'a + Copy,
     Self: Serialize + DeserializeOwned,
 {
     fn build<C, I>(provider: &'a E, params: &P, cache: &mut C, info: &mut I) -> Self
@@ -101,7 +99,7 @@ where
     where
         I: Info;
 
-    fn get_closest<I>(
+    fn get_closest<'t, I>(
         &self,
         count: usize,
         ldist: &LocalDistance<'a, E, D, T>,
@@ -140,8 +138,8 @@ where
     N: Tree<'a, P, E, D, T>,
     E: EmbeddingProvider<'a, D, T>,
     D: Distance<T>,
-    T: 'a,
-    Self: NearestNeighbors<'a, T>,
+    T: 'a + Copy,
+    Self: NearestNeighbors<'a, E, D, T>,
 {
     fn build<C, I>(&'a mut self, params: &P, cache: &mut C, info: &mut I)
     where
@@ -185,9 +183,9 @@ pub trait Forest<'a, P, N, E, D, T, B>
 where
     P: BuildParams,
     N: Tree<'a, P, E, D, T>,
-    E: EmbeddingProvider<'a, D, T> + NearestNeighbors<'a, T> + 'a,
+    E: EmbeddingProvider<'a, D, T> + NearestNeighbors<'a, E, D, T> + 'a,
     D: Distance<T>,
-    T: 'a,
+    T: 'a + Copy,
     B: Buildable<'a, P, N, E, D, T> + 'a,
     Self: Sized + 'a,
 {
@@ -266,7 +264,7 @@ where
         })
     }
 
-    fn save_all<W>(&'a mut self, file: &mut W) -> Result<(), TreeWriteError>
+    fn save_all<W>(&mut self, file: &mut W) -> Result<(), TreeWriteError>
     where
         W: std::io::Write + std::io::Seek,
     {
@@ -285,18 +283,13 @@ where
         })
     }
 
-    fn get_trees(&'a self) -> &'a Vec<B>;
+    fn get_trees(&self) -> &Vec<B>;
 
-    fn get_trees_mut(&'a mut self) -> &'a mut Vec<B>;
+    fn get_trees_mut(&mut self) -> &mut Vec<B>;
 
     fn get_remain(&self) -> &E;
 
-    fn get_closest<I>(
-        &'a self,
-        other: &'a Embedding<T>,
-        count: usize,
-        info: &mut I,
-    ) -> Vec<(usize, f64)>
+    fn get_closest<I>(&'a self, other: T, count: usize, info: &mut I) -> Vec<(usize, f64)>
     where
         I: Info,
     {
@@ -306,7 +299,7 @@ where
             .map(|tree| tree.get_closest(other, count, info))
             .flatten()
             .collect();
-        res.extend(self.get_remain().get_closest(other, count, info));
+        // res.extend(self.get_remain().get_closest(other, count, info));
         res.par_sort_unstable_by(|(_, a), (_, b)| a.total_cmp(b));
         res.truncate(count);
         res

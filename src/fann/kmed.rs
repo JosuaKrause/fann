@@ -5,8 +5,7 @@ use std::{
 };
 
 use crate::{
-    info::Info, BuildParams, Cache, Distance, DistanceCmp, Embedding, EmbeddingProvider,
-    LocalDistance, Tree,
+    info::Info, BuildParams, Cache, Distance, DistanceCmp, EmbeddingProvider, LocalDistance, Tree,
 };
 
 const HIGHLIGHT_A: &str = "*";
@@ -35,35 +34,8 @@ impl Node {
         }
     }
 
-    fn get_embed<'a, E, D, T>(&self, provider: &'a E) -> Embedding<T>
-    where
-        E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T>,
-        T: 'a,
-    {
-        provider.get(self.centroid_index)
-    }
-
     fn is_before_leaf(&self) -> bool {
         self.children.iter().all(|c| c.node.children.is_empty())
-    }
-
-    fn get_internal_dist<'a, E, D, T, C, I>(
-        &self,
-        embed: &Embedding<T>,
-        provider: &'a E,
-        cache: &mut C,
-        info: &mut I,
-    ) -> DistanceCmp
-    where
-        E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T>,
-        T: 'a,
-        C: Cache,
-        I: Info,
-    {
-        let distance = provider.distance();
-        cache.cached_distance(&self.get_embed(provider), embed, distance, info)
     }
 
     fn get_dist<'a, E, D, T, I>(
@@ -74,7 +46,7 @@ impl Node {
     where
         E: EmbeddingProvider<'a, D, T>,
         D: Distance<T>,
-        T: 'a,
+        T: 'a + Copy,
         I: Info,
     {
         ldist.distance_cmp(self.centroid_index, info)
@@ -114,7 +86,8 @@ impl Node {
         C: Cache,
         I: Info,
     {
-        let center_dist = self.get_internal_dist(&child.get_embed(provider), provider, cache, info);
+        let center_dist =
+            provider.dist_internal(&self.centroid_index, &child.centroid_index, cache, info);
         self.children.push(Child {
             node: child,
             center_dist,
@@ -133,7 +106,7 @@ impl Node {
     ) where
         E: EmbeddingProvider<'a, D, T>,
         D: Distance<T>,
-        T: 'a,
+        T: 'a + Copy,
         I: Info,
     {
         fn max_dist(res: &Vec<(usize, DistanceCmp)>, count: usize) -> DistanceCmp {
@@ -306,23 +279,6 @@ pub struct FannTree {
 }
 
 impl FannTree {
-    fn get_dist<'a, E, D, T, C, I>(
-        provider: &E,
-        embed_a: &Embedding<T>,
-        embed_b: &Embedding<T>,
-        cache: &mut C,
-        info: &mut I,
-    ) -> DistanceCmp
-    where
-        E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T>,
-        T: 'a,
-        C: Cache,
-        I: Info,
-    {
-        cache.cached_distance(embed_a, embed_b, provider.distance(), info)
-    }
-
     fn centroid<'a, E, D, T, C, I>(
         provider: &'a E,
         all_ixs: &Vec<usize>,
@@ -341,15 +297,13 @@ impl FannTree {
                 .iter()
                 .fold((None, DistanceCmp::of(f64::INFINITY)), |best, &ix| {
                     let (best_ix, best_dist) = best;
-                    let embed = provider.get(ix);
                     let cur_dist: DistanceCmp =
                         all_ixs.iter().fold(DistanceCmp::zero(), |res, &oix| {
                             if oix == ix || res > best_dist {
                                 res
                             } else {
-                                let oembed = provider.get(oix);
                                 res.combine(
-                                    &Self::get_dist(provider, &embed, &oembed, cache, info),
+                                    &provider.dist_internal(&ix, &oix, cache, info),
                                     |cur, dist| cur + dist,
                                 )
                             }
@@ -398,14 +352,11 @@ impl FannTree {
                 .iter()
                 .filter(|&ix| !centroids.contains(ix))
                 .for_each(|&ix| {
-                    let embed = provider.get(ix);
                     let (_, best) = res
                         .iter_mut()
                         .min_by(|(a, _), (b, _)| {
-                            let dist_a =
-                                Self::get_dist(provider, &embed, &provider.get(*a), cache, info);
-                            let dist_b =
-                                Self::get_dist(provider, &embed, &provider.get(*b), cache, info);
+                            let dist_a = provider.dist_internal(&ix, a, cache, info);
+                            let dist_b = provider.dist_internal(&ix, b, cache, info);
                             dist_a.cmp(&dist_b)
                         })
                         .unwrap();
@@ -496,7 +447,7 @@ impl<'a, E, D, T> Tree<'a, FannBuildParams, E, D, T> for FannTree
 where
     E: EmbeddingProvider<'a, D, T>,
     D: Distance<T>,
-    T: 'a,
+    T: 'a + Copy,
 {
     fn build<C, I>(provider: &'a E, params: &FannBuildParams, cache: &mut C, info: &mut I) -> Self
     where

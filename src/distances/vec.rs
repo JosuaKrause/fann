@@ -1,6 +1,5 @@
 use crate::{
-    info::Info, Distance, DistanceCmp, Embedding, EmbeddingProvider, InvalidRangeError,
-    NearestNeighbors,
+    info::Info, Distance, DistanceCmp, EmbeddingProvider, InvalidRangeError, NearestNeighbors,
 };
 use digest::Digest;
 
@@ -10,11 +9,10 @@ pub struct VecDotDistance;
 pub const VEC_DOT_DISTANCE: VecDotDistance = VecDotDistance;
 
 impl Distance<&Vec<f64>> for VecDotDistance {
-    fn distance_cmp(&self, a: &Embedding<&Vec<f64>>, b: &Embedding<&Vec<f64>>) -> DistanceCmp {
+    fn distance_cmp(&self, a: &Vec<f64>, b: &Vec<f64>) -> DistanceCmp {
         let res: f64 = a
-            .embed
             .iter()
-            .zip(b.embed.iter())
+            .zip(b.iter())
             .map(|(&cur_a, &cur_b)| cur_a * cur_b)
             .sum();
         DistanceCmp::of((-res).exp())
@@ -35,11 +33,10 @@ pub struct VecL2Distance;
 pub const VEC_L2_DISTANCE: VecL2Distance = VecL2Distance;
 
 impl Distance<&Vec<f64>> for VecL2Distance {
-    fn distance_cmp(&self, a: &Embedding<&Vec<f64>>, b: &Embedding<&Vec<f64>>) -> DistanceCmp {
+    fn distance_cmp(&self, a: &Vec<f64>, b: &Vec<f64>) -> DistanceCmp {
         let res: f64 = a
-            .embed
             .iter()
-            .zip(b.embed.iter())
+            .zip(b.iter())
             .map(|(&cur_a, &cur_b)| (cur_a - cur_b) * (cur_a - cur_b))
             .sum();
         DistanceCmp::of(res)
@@ -81,9 +78,21 @@ where
     D: Distance<&'a Vec<f64>>,
     Self: 'a,
 {
-    fn get_embed(&'a self, index: usize) -> &'a Vec<f64> {
+    fn with_embed<F, R>(&self, &index: &usize, op: F) -> R
+    where
+        F: Fn(&'a Vec<f64>) -> R,
+    {
         assert!(self.range.contains(&index));
-        &self.embeddings[index]
+        op(&self.embeddings[index])
+    }
+
+    fn with_pair<F, R>(&self, &a: &usize, &b: &usize, op: F) -> R
+    where
+        F: Fn(&'a Vec<f64>, &'a Vec<f64>) -> R,
+    {
+        assert!(self.range.contains(&a));
+        assert!(self.range.contains(&b));
+        op(&self.embeddings[a], &self.embeddings[b])
     }
 
     fn all(&self) -> std::ops::Range<usize> {
@@ -116,16 +125,11 @@ where
     }
 }
 
-impl<'a, D> NearestNeighbors<'a, &'a Vec<f64>> for VecProvider<'a, D>
+impl<'a, D> NearestNeighbors<'a, VecProvider<'a, D>, D, &'a Vec<f64>> for VecProvider<'a, D>
 where
-    D: Distance<&'a Vec<f64>>,
+    D: Distance<&'a Vec<f64>> + Copy + 'a,
 {
-    fn get_closest<I>(
-        &self,
-        other: &Embedding<&'a Vec<f64>>,
-        count: usize,
-        _info: &mut I,
-    ) -> Vec<(usize, f64)>
+    fn get_closest<I>(&self, other: &'a Vec<f64>, count: usize, _info: &mut I) -> Vec<(usize, f64)>
     where
         I: Info,
     {
@@ -133,10 +137,7 @@ where
             .embeddings
             .iter()
             .enumerate()
-            .map(|(ix, cur)| {
-                let val = Embedding::wrap(cur, ix);
-                (ix, self.distance.distance_cmp(&val, other))
-            })
+            .map(|(ix, cur)| (ix, self.distance.distance_cmp(cur, other)))
             .collect();
         dists.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
         dists

@@ -2,8 +2,7 @@ use digest::Digest;
 use ndarray::{s, Array1, ArrayView1, ArrayView2};
 
 use crate::{
-    info::Info, Distance, DistanceCmp, Embedding, EmbeddingProvider, InvalidRangeError,
-    NearestNeighbors,
+    info::Info, Distance, DistanceCmp, EmbeddingProvider, InvalidRangeError, NearestNeighbors,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -12,12 +11,8 @@ pub struct NdDotDistance;
 pub const ND_DOT_DISTANCE: NdDotDistance = NdDotDistance;
 
 impl<'a> Distance<ArrayView1<'a, f64>> for NdDotDistance {
-    fn distance_cmp(
-        &self,
-        a: &Embedding<ArrayView1<'a, f64>>,
-        b: &Embedding<ArrayView1<'a, f64>>,
-    ) -> DistanceCmp {
-        DistanceCmp::of((-a.embed.dot(&b.embed)).exp())
+    fn distance_cmp(&self, a: ArrayView1<'a, f64>, b: ArrayView1<'a, f64>) -> DistanceCmp {
+        DistanceCmp::of((-a.dot(&b)).exp())
     }
 
     fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64 {
@@ -35,12 +30,8 @@ pub struct NdL2Distance;
 pub const ND_L2_DISTANCE: NdL2Distance = NdL2Distance;
 
 impl<'a> Distance<ArrayView1<'a, f64>> for NdL2Distance {
-    fn distance_cmp(
-        &self,
-        a: &Embedding<ArrayView1<'a, f64>>,
-        b: &Embedding<ArrayView1<'a, f64>>,
-    ) -> DistanceCmp {
-        let diff = &a.embed - &b.embed.view();
+    fn distance_cmp(&self, a: ArrayView1<'a, f64>, b: ArrayView1<'a, f64>) -> DistanceCmp {
+        let diff = &a - &b;
         let res = (&diff * &diff).sum();
         DistanceCmp::of(res)
     }
@@ -81,8 +72,18 @@ where
     D: Distance<ArrayView1<'a, f64>>,
     Self: 'a,
 {
-    fn get_embed(&'a self, index: usize) -> ArrayView1<'a, f64> {
-        self.arr.row(index - self.offset)
+    fn with_embed<F, R>(&'a self, &index: &usize, op: F) -> R
+    where
+        F: Fn(ArrayView1<'a, f64>) -> R,
+    {
+        op(self.arr.row(index - self.offset))
+    }
+
+    fn with_pair<F, R>(&'a self, &a: &usize, &b: &usize, op: F) -> R
+    where
+        F: Fn(ArrayView1<'a, f64>, ArrayView1<'a, f64>) -> R,
+    {
+        op(self.arr.row(a - self.offset), self.arr.row(b - self.offset))
     }
 
     fn all(&self) -> std::ops::Range<usize> {
@@ -121,20 +122,19 @@ where
     }
 }
 
-impl<'a> NearestNeighbors<'a, ArrayView1<'a, f64>> for NdProvider<'a, NdDotDistance> {
+impl<'a> NearestNeighbors<'a, NdProvider<'a, NdDotDistance>, NdDotDistance, ArrayView1<'a, f64>>
+    for NdProvider<'a, NdDotDistance>
+{
     fn get_closest<I>(
         &self,
-        other: &Embedding<ArrayView1<'a, f64>>,
+        other: ArrayView1<'a, f64>,
         count: usize,
         _info: &mut I,
     ) -> Vec<(usize, f64)>
     where
         I: Info,
     {
-        let dists: Array1<DistanceCmp> = self
-            .arr
-            .dot(&other.embed)
-            .map(|v| DistanceCmp::of((-v).exp()));
+        let dists: Array1<DistanceCmp> = self.arr.dot(&other).map(|v| DistanceCmp::of((-v).exp()));
         let mut indices: Vec<usize> = (0..dists.len()).collect();
         indices.sort_unstable_by_key(|&ix| dists[ix]);
         indices
