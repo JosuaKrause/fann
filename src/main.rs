@@ -52,7 +52,7 @@ fn main() {
     let df = load_embed(args.file.as_str());
     println!("load took {:?}", t_load.elapsed());
     println!("{shape:?}", shape = df.shape());
-    let mut info = BaseInfo::new(total_size);
+    let mut info = BaseInfo::new();
 
     let all = df.slice(s![0..total_size, ..]);
     let provider = NdProvider::new(&all, ND_DOT_DISTANCE);
@@ -78,6 +78,8 @@ fn main() {
             .unwrap();
     } else {
         forest.build_all(&params, &mut cache, &mut info);
+        let mut file = std::fs::File::create(tfile).unwrap();
+        forest.save_all(&mut file).unwrap();
     }
     println!("build took {:?}", t_build.elapsed());
     let (hits, miss) = info.cache_hits_miss();

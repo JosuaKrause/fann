@@ -1,6 +1,5 @@
-use std::collections::{hash_map::IntoIter, HashMap};
+use std::collections::{hash_map::IntoIter, HashMap, HashSet};
 
-use bitvec::vec::BitVec;
 use polars::export::num::ToPrimitive;
 
 pub trait Info {
@@ -55,16 +54,16 @@ pub struct BaseInfo {
     hits: u64,
     miss: u64,
     scan_map: HashMap<usize, &'static str>,
-    dist_vec: BitVec,
+    dist_set: HashSet<usize>,
 }
 
 impl BaseInfo {
-    pub fn new(size: usize) -> BaseInfo {
+    pub fn new() -> BaseInfo {
         BaseInfo {
             hits: 0,
             miss: 0,
             scan_map: HashMap::new(),
-            dist_vec: BitVec::repeat(false, size),
+            dist_set: HashSet::new(),
         }
     }
 }
@@ -85,7 +84,7 @@ impl Info for BaseInfo {
     }
 
     fn log_dist(&mut self, index: usize) {
-        self.dist_vec.set(index, true);
+        self.dist_set.insert(index);
     }
 
     fn cache_hits_miss(&self) -> (u64, u64) {
@@ -97,17 +96,17 @@ impl Info for BaseInfo {
     }
 
     fn dist_vec(&self) -> Vec<usize> {
-        self.dist_vec.iter_ones().collect()
+        self.dist_set.iter().map(|&ix| ix).collect()
     }
 
     fn dist_count(&self) -> usize {
-        self.dist_vec.count_ones()
+        self.dist_set.len()
     }
 
     fn clear(&mut self) {
         self.hits = 0;
         self.miss = 0;
         self.scan_map = HashMap::new();
-        self.dist_vec = BitVec::repeat(false, self.dist_vec.len());
+        self.dist_set = HashSet::new();
     }
 }
