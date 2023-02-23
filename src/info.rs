@@ -1,7 +1,5 @@
 use std::collections::{hash_map::IntoIter, HashMap, HashSet};
 
-use polars::export::num::ToPrimitive;
-
 pub trait Info {
     fn log_cache_access(&mut self, is_miss: bool);
     fn log_scan(&mut self, index: usize, is_outer: bool);
@@ -10,7 +8,7 @@ pub trait Info {
     fn cache_hits_miss(&self) -> (u64, u64);
     fn cache_hit_rate(&self) -> f64 {
         let (hits, miss) = self.cache_hits_miss();
-        hits.to_f64().unwrap() / (hits + miss).to_f64().unwrap()
+        (hits as f64) / ((hits + miss) as f64)
     }
 
     fn scan_map(&self) -> IntoIter<usize, &str>;
