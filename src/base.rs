@@ -50,11 +50,8 @@ impl Ord for DistanceCmp {
     }
 }
 
-pub trait Distance<T>
-where
-    Self: Copy,
-{
-    fn distance_cmp(&self, a: T, b: T) -> DistanceCmp;
+pub trait Distance<T> {
+    fn distance_cmp(&self, a: &T, b: &T) -> DistanceCmp;
     fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64;
     fn name(&self) -> &str;
 }
@@ -68,24 +65,23 @@ impl fmt::Display for InvalidRangeError {
     }
 }
 
-pub trait EmbeddingProvider<'a, D, T>
+pub trait EmbeddingProvider<D, T>
 where
     D: Distance<T>,
-    Self: Sized + 'a,
-    T: 'a,
+    Self: Sized,
 {
-    fn with_embed<F, R>(&'a self, index: &usize, op: F) -> R
+    fn with_embed<F, R>(&self, index: usize, op: F) -> R
     where
-        F: Fn(T) -> R;
+        F: Fn(&T) -> R;
 
-    fn with_pair<F, R>(&'a self, a: &usize, b: &usize, op: F) -> R
+    fn with_pair<F, R>(&self, a: usize, b: usize, op: F) -> R
     where
-        F: Fn(T, T) -> R;
+        F: Fn(&T, &T) -> R;
 
     fn dist_internal<C, I>(
-        &'a self,
-        &aindex: &usize,
-        &bindex: &usize,
+        &self,
+        aindex: usize,
+        bindex: usize,
         cache: &mut C,
         info: &mut I,
     ) -> DistanceCmp
@@ -103,7 +99,7 @@ where
             }
             None => {
                 info.log_cache_access(true);
-                let res = self.with_pair(&aindex, &bindex, |embed_a, embed_b| {
+                let res = self.with_pair(aindex, bindex, |embed_a, embed_b| {
                     self.distance().distance_cmp(embed_a, embed_b)
                 });
                 cache.put(Key::new(aindex, bindex), res);
@@ -130,7 +126,7 @@ where
         format!("{hash:x}", hash = hasher.finalize())
     }
 
-    fn subrange(&'a self, new_range: std::ops::Range<usize>) -> Result<Self, InvalidRangeError>;
+    fn subrange(&self, new_range: std::ops::Range<usize>) -> Result<Self, InvalidRangeError>;
 }
 
 #[derive(Hash, Eq, PartialEq, Debug)]
@@ -155,23 +151,21 @@ pub trait Cache {
 
 pub struct LocalDistance<'a, E, D, T>
 where
-    E: EmbeddingProvider<'a, D, T>,
+    E: EmbeddingProvider<D, T>,
     D: Distance<T>,
-    T: 'a + Copy,
 {
     provider: &'a E,
-    embed: T,
+    embed: &'a T,
     distance_type: PhantomData<D>,
 }
 
 impl<'a, E, D, T> LocalDistance<'a, E, D, T>
 where
-    E: EmbeddingProvider<'a, D, T>,
+    E: EmbeddingProvider<D, T>,
     D: Distance<T>,
-    T: 'a + Copy,
 {
-    pub fn new(provider: &'a E, embed: T) -> Self {
-        LocalDistance {
+    pub fn new(provider: &'a E, embed: &'a T) -> Self {
+        Self {
             provider,
             embed,
             distance_type: PhantomData,
@@ -185,7 +179,7 @@ where
         info.log_dist(index);
         let distance = self.provider.distance();
         self.provider
-            .with_embed(&index, |other| distance.distance_cmp(self.embed, other))
+            .with_embed(index, |other| distance.distance_cmp(&self.embed, other))
     }
 
     pub fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64 {
@@ -194,13 +188,12 @@ where
     }
 }
 
-pub trait NearestNeighbors<'a, E, D, T>
+pub trait NearestNeighbors<E, D, T>
 where
-    E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T> + Copy,
-    T: 'a,
+    E: EmbeddingProvider<D, T>,
+    D: Distance<T>,
 {
-    fn get_closest<I>(&'a self, other: T, count: usize, info: &mut I) -> Vec<(usize, f64)>
+    fn get_closest<I>(&self, other: &T, count: usize, info: &mut I) -> Vec<(usize, f64)>
     where
         I: Info;
 }

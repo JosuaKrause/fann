@@ -44,9 +44,8 @@ impl Node {
         info: &mut I,
     ) -> DistanceCmp
     where
-        E: EmbeddingProvider<'a, D, T>,
+        E: EmbeddingProvider<D, T>,
         D: Distance<T>,
-        T: 'a + Copy,
         I: Info,
     {
         ldist.distance_cmp(self.centroid_index, info)
@@ -73,21 +72,15 @@ impl Node {
             .unwrap_or(DistanceCmp::zero());
     }
 
-    fn add_child<'a, E, D, T, C, I>(
-        &mut self,
-        child: Node,
-        provider: &'a E,
-        cache: &mut C,
-        info: &mut I,
-    ) where
-        E: EmbeddingProvider<'a, D, T>,
+    fn add_child<E, D, T, C, I>(&mut self, child: Node, provider: &E, cache: &mut C, info: &mut I)
+    where
+        E: EmbeddingProvider<D, T>,
         D: Distance<T>,
-        T: 'a,
         C: Cache,
         I: Info,
     {
         let center_dist =
-            provider.dist_internal(&self.centroid_index, &child.centroid_index, cache, info);
+            provider.dist_internal(self.centroid_index, child.centroid_index, cache, info);
         self.children.push(Child {
             node: child,
             center_dist,
@@ -104,9 +97,8 @@ impl Node {
         ldist: &LocalDistance<'a, E, D, T>,
         info: &mut I,
     ) where
-        E: EmbeddingProvider<'a, D, T>,
+        E: EmbeddingProvider<D, T>,
         D: Distance<T>,
-        T: 'a + Copy,
         I: Info,
     {
         fn max_dist(res: &Vec<(usize, DistanceCmp)>, count: usize) -> DistanceCmp {
@@ -279,16 +271,15 @@ pub struct FannTree {
 }
 
 impl FannTree {
-    fn centroid<'a, E, D, T, C, I>(
-        provider: &'a E,
+    fn centroid<E, D, T, C, I>(
+        provider: &E,
         all_ixs: &Vec<usize>,
         cache: &mut C,
         info: &mut I,
     ) -> usize
     where
-        E: EmbeddingProvider<'a, D, T>,
+        E: EmbeddingProvider<D, T>,
         D: Distance<T>,
-        T: 'a,
         C: Cache,
         I: Info,
     {
@@ -303,7 +294,7 @@ impl FannTree {
                                 res
                             } else {
                                 res.combine(
-                                    &provider.dist_internal(&ix, &oix, cache, info),
+                                    &provider.dist_internal(ix, oix, cache, info),
                                     |cur, dist| cur + dist,
                                 )
                             }
@@ -317,8 +308,8 @@ impl FannTree {
         res_ix.unwrap()
     }
 
-    fn kmedoid<'a, E, D, T, C, I>(
-        provider: &'a E,
+    fn kmedoid<E, D, T, C, I>(
+        provider: &E,
         all_ixs: Vec<usize>,
         init_centroids: Option<Vec<usize>>,
         k_num: usize,
@@ -326,9 +317,8 @@ impl FannTree {
         info: &mut I,
     ) -> Vec<(usize, Vec<usize>)>
     where
-        E: EmbeddingProvider<'a, D, T>,
+        E: EmbeddingProvider<D, T>,
         D: Distance<T>,
-        T: 'a,
         C: Cache,
         I: Info,
     {
@@ -355,8 +345,8 @@ impl FannTree {
                     let (_, best) = res
                         .iter_mut()
                         .min_by(|(a, _), (b, _)| {
-                            let dist_a = provider.dist_internal(&ix, a, cache, info);
-                            let dist_b = provider.dist_internal(&ix, b, cache, info);
+                            let dist_a = provider.dist_internal(ix, *a, cache, info);
+                            let dist_b = provider.dist_internal(ix, *b, cache, info);
                             dist_a.cmp(&dist_b)
                         })
                         .unwrap();
@@ -388,8 +378,8 @@ impl FannTree {
         ixs.retain(|&ix| ix != index);
     }
 
-    fn build_level<'a, E, D, T, C, I>(
-        provider: &'a E,
+    fn build_level<E, D, T, C, I>(
+        provider: &E,
         cache: &mut C,
         info: &mut I,
         cur_root_ix: usize,
@@ -397,9 +387,8 @@ impl FannTree {
         max_node_size: usize,
     ) -> Node
     where
-        E: EmbeddingProvider<'a, D, T>,
+        E: EmbeddingProvider<D, T>,
         D: Distance<T>,
-        T: 'a,
         C: Cache,
         I: Info,
     {
@@ -443,13 +432,12 @@ pub struct FannBuildParams {
 
 impl BuildParams for FannBuildParams {}
 
-impl<'a, E, D, T> Tree<'a, FannBuildParams, E, D, T> for FannTree
+impl<E, D, T> Tree<FannBuildParams, E, D, T> for FannTree
 where
-    E: EmbeddingProvider<'a, D, T>,
+    E: EmbeddingProvider<D, T>,
     D: Distance<T>,
-    T: 'a + Copy,
 {
-    fn build<C, I>(provider: &'a E, params: &FannBuildParams, cache: &mut C, info: &mut I) -> Self
+    fn build<C, I>(provider: &E, params: &FannBuildParams, cache: &mut C, info: &mut I) -> Self
     where
         C: Cache,
         I: Info,
@@ -507,7 +495,7 @@ where
             .join("\n")
     }
 
-    fn get_closest<I>(
+    fn get_closest<'a, I>(
         &self,
         count: usize,
         ldist: &LocalDistance<'a, E, D, T>,

@@ -75,15 +75,14 @@ impl From<serde_json::Error> for TreeWriteError {
 
 pub trait BuildParams {}
 
-pub trait Tree<'a, P, E, D, T>
+pub trait Tree<P, E, D, T>
 where
     P: BuildParams,
-    E: EmbeddingProvider<'a, D, T>,
+    E: EmbeddingProvider<D, T>,
     D: Distance<T>,
-    T: 'a + Copy,
     Self: Serialize + DeserializeOwned,
 {
-    fn build<C, I>(provider: &'a E, params: &P, cache: &mut C, info: &mut I) -> Self
+    fn build<C, I>(provider: &E, params: &P, cache: &mut C, info: &mut I) -> Self
     where
         C: Cache,
         I: Info;
@@ -99,7 +98,7 @@ where
     where
         I: Info;
 
-    fn get_closest<'t, I>(
+    fn get_closest<'a, I>(
         &self,
         count: usize,
         ldist: &LocalDistance<'a, E, D, T>,
@@ -132,16 +131,15 @@ where
     }
 }
 
-pub trait Buildable<'a, P, N, E, D, T>
+pub trait Buildable<P, N, E, D, T>
 where
     P: BuildParams,
-    N: Tree<'a, P, E, D, T>,
-    E: EmbeddingProvider<'a, D, T>,
+    N: Tree<P, E, D, T>,
+    E: EmbeddingProvider<D, T>,
     D: Distance<T>,
-    T: 'a + Copy,
-    Self: NearestNeighbors<'a, E, D, T>,
+    Self: NearestNeighbors<E, D, T>,
 {
-    fn build<C, I>(&'a mut self, params: &P, cache: &mut C, info: &mut I)
+    fn build<C, I>(&mut self, params: &P, cache: &mut C, info: &mut I)
     where
         C: Cache,
         I: Info;
@@ -179,21 +177,20 @@ where
     fn clear_tree(&mut self);
 }
 
-pub trait Forest<'a, P, N, E, D, T, B>
+pub trait Forest<P, N, E, D, T, B>
 where
     P: BuildParams,
-    N: Tree<'a, P, E, D, T>,
-    E: EmbeddingProvider<'a, D, T> + NearestNeighbors<'a, E, D, T> + 'a,
+    N: Tree<P, E, D, T>,
+    E: EmbeddingProvider<D, T> + NearestNeighbors<E, D, T>,
     D: Distance<T>,
-    T: 'a + Copy,
-    B: Buildable<'a, P, N, E, D, T> + 'a,
-    Self: Sized + 'a,
+    B: Buildable<P, N, E, D, T>,
+    Self: Sized,
 {
     fn create_from(trees: Vec<B>, remain: E) -> Self;
 
     fn create_builder_from(provider: E) -> B;
 
-    fn create(provider: &'a E, min_tree_size: usize, max_tree_size: usize) -> Self {
+    fn create(provider: &E, min_tree_size: usize, max_tree_size: usize) -> Self {
         let all = provider.all();
         let is_large_end = all.len() % max_tree_size >= min_tree_size;
         let expected_trees = all.len() / max_tree_size + if is_large_end { 1 } else { 0 };
@@ -209,7 +206,7 @@ where
         Self::create_from(trees, remain)
     }
 
-    fn build_all<C, I>(&'a mut self, params: &P, cache: &mut C, info: &mut I)
+    fn build_all<C, I>(&mut self, params: &P, cache: &mut C, info: &mut I)
     where
         C: Cache,
         I: Info,
@@ -229,7 +226,7 @@ where
     }
 
     fn load_all<R, C, I>(
-        &'a mut self,
+        &mut self,
         file: &mut R,
         ignore_provider: bool,
         params: &P,
@@ -289,7 +286,7 @@ where
 
     fn get_remain(&self) -> &E;
 
-    fn get_closest<I>(&'a self, other: T, count: usize, info: &mut I) -> Vec<(usize, f64)>
+    fn get_closest<I>(&self, other: &T, count: usize, info: &mut I) -> Vec<(usize, f64)>
     where
         I: Info,
     {

@@ -7,33 +7,31 @@ use crate::{
 
 pub mod kmed;
 
-pub struct Fann<'a, P, N, E, D, T>
+pub struct Fann<P, N, E, D, T>
 where
     P: BuildParams,
-    N: Tree<'a, P, E, D, T>,
-    E: EmbeddingProvider<'a, D, T>,
+    N: Tree<P, E, D, T>,
+    E: EmbeddingProvider<D, T>,
     D: Distance<T>,
-    T: 'a + Copy,
 {
     provider: E,
     root: Option<N>,
     is_dirty: bool,
     param_type: PhantomData<P>,
-    provider_type: PhantomData<&'a E>,
+    provider_type: PhantomData<E>,
     distance_type: PhantomData<D>,
     embed_type: PhantomData<T>,
 }
 
-impl<'a, P, N, E, D, T> Fann<'a, P, N, E, D, T>
+impl<P, N, E, D, T> Fann<P, N, E, D, T>
 where
     P: BuildParams,
-    N: Tree<'a, P, E, D, T>,
-    E: EmbeddingProvider<'a, D, T>,
+    N: Tree<P, E, D, T>,
+    E: EmbeddingProvider<D, T>,
     D: Distance<T>,
-    T: 'a + Copy,
 {
-    pub fn new(provider: E) -> Fann<'a, P, N, E, D, T> {
-        Fann {
+    pub fn new(provider: E) -> Self {
+        Self {
             provider,
             root: None,
             is_dirty: false,
@@ -64,15 +62,14 @@ where
     }
 }
 
-impl<'a, P, N, E, D, T> NearestNeighbors<'a, E, D, T> for Fann<'a, P, N, E, D, T>
+impl<P, N, E, D, T> NearestNeighbors<E, D, T> for Fann<P, N, E, D, T>
 where
     P: BuildParams,
-    N: Tree<'a, P, E, D, T>,
-    E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T> + Copy,
-    T: 'a + Copy,
+    N: Tree<P, E, D, T>,
+    E: EmbeddingProvider<D, T>,
+    D: Distance<T>,
 {
-    fn get_closest<I>(&'a self, other: T, count: usize, info: &mut I) -> Vec<(usize, f64)>
+    fn get_closest<I>(&self, other: &T, count: usize, info: &mut I) -> Vec<(usize, f64)>
     where
         I: Info,
     {
@@ -84,15 +81,14 @@ where
     }
 }
 
-impl<'a, P, N, E, D, T> Buildable<'a, P, N, E, D, T> for Fann<'a, P, N, E, D, T>
+impl<P, N, E, D, T> Buildable<P, N, E, D, T> for Fann<P, N, E, D, T>
 where
     P: BuildParams,
-    N: Tree<'a, P, E, D, T>,
-    E: EmbeddingProvider<'a, D, T>,
+    N: Tree<P, E, D, T>,
+    E: EmbeddingProvider<D, T>,
     D: Distance<T>,
-    T: 'a + Copy,
 {
-    fn build<C, I>(&'a mut self, params: &P, cache: &mut C, info: &mut I)
+    fn build<C, I>(&mut self, params: &P, cache: &mut C, info: &mut I)
     where
         C: Cache,
         I: Info,
@@ -127,30 +123,26 @@ where
     }
 }
 
-pub struct FannForest<'a, P, N, E, D, T>
+pub struct FannForest<P, N, E, D, T>
 where
     P: BuildParams,
-    N: Tree<'a, P, E, D, T>,
-    E: EmbeddingProvider<'a, D, T> + NearestNeighbors<'a, E, D, T>,
+    N: Tree<P, E, D, T>,
+    E: EmbeddingProvider<D, T> + NearestNeighbors<E, D, T>,
     D: Distance<T>,
-    T: 'a + Copy,
 {
-    trees: Vec<Fann<'a, P, N, E, D, T>>,
+    trees: Vec<Fann<P, N, E, D, T>>,
     remain: E,
     param_type: PhantomData<P>,
 }
 
-impl<'a, P, N, E, D, T> Forest<'a, P, N, E, D, T, Fann<'a, P, N, E, D, T>>
-    for FannForest<'a, P, N, E, D, T>
+impl<P, N, E, D, T> Forest<P, N, E, D, T, Fann<P, N, E, D, T>> for FannForest<P, N, E, D, T>
 where
     P: BuildParams,
-    N: Tree<'a, P, E, D, T>,
-    E: EmbeddingProvider<'a, D, T> + NearestNeighbors<'a, E, D, T>,
+    N: Tree<P, E, D, T>,
+    E: EmbeddingProvider<D, T> + NearestNeighbors<E, D, T>,
     D: Distance<T>,
-    T: 'a + Copy,
-    Self: 'a,
 {
-    fn create_from(trees: Vec<Fann<'a, P, N, E, D, T>>, remain: E) -> Self {
+    fn create_from(trees: Vec<Fann<P, N, E, D, T>>, remain: E) -> Self {
         Self {
             trees,
             remain,
@@ -158,15 +150,15 @@ where
         }
     }
 
-    fn create_builder_from(provider: E) -> Fann<'a, P, N, E, D, T> {
+    fn create_builder_from(provider: E) -> Fann<P, N, E, D, T> {
         Fann::new(provider)
     }
 
-    fn get_trees(&self) -> &Vec<Fann<'a, P, N, E, D, T>> {
+    fn get_trees(&self) -> &Vec<Fann<P, N, E, D, T>> {
         &self.trees
     }
 
-    fn get_trees_mut(&mut self) -> &mut Vec<Fann<'a, P, N, E, D, T>> {
+    fn get_trees_mut(&mut self) -> &mut Vec<Fann<P, N, E, D, T>> {
         &mut self.trees
     }
 
