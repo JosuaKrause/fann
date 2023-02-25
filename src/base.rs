@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{fmt, marker::PhantomData};
 
 use blake2::Blake2s256;
 use digest::Digest;
@@ -50,42 +50,67 @@ impl Ord for DistanceCmp {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Embedding<T> {
-    pub embed: T,
-    pub index: Option<usize>,
-}
-
-impl<T> Embedding<T> {
-    pub fn wrap(embed: T, index: usize) -> Embedding<T> {
-        Embedding {
-            embed,
-            index: Some(index),
-        }
-    }
-
-    pub fn as_embedding(embed: T) -> Embedding<T> {
-        Embedding { embed, index: None }
-    }
-}
-
 pub trait Distance<T> {
-    fn distance_cmp(&self, a: &Embedding<T>, b: &Embedding<T>) -> DistanceCmp;
+    fn distance_cmp(&self, a: &T, b: &T) -> DistanceCmp;
     fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64;
     fn name(&self) -> &str;
 }
 
-pub trait EmbeddingProvider<'a, D, T>
-where
-    D: Distance<T> + Copy,
-{
-    fn get_embed(&'a self, index: usize) -> T;
-    fn all(&self) -> std::ops::Range<usize>;
-    fn distance(&self) -> D;
+#[derive(Debug, Clone)]
+pub struct InvalidRangeError;
 
-    fn get(&'a self, index: usize) -> Embedding<T> {
-        Embedding::wrap(self.get_embed(index), index)
+impl fmt::Display for InvalidRangeError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "given range is invalid")
     }
+}
+
+pub trait EmbeddingProvider<D, T>
+where
+    D: Distance<T>,
+    Self: Sized,
+{
+    fn with_embed<F, R>(&self, index: usize, op: F) -> R
+    where
+        F: Fn(&T) -> R;
+
+    fn with_pair<F, R>(&self, a: usize, b: usize, op: F) -> R
+    where
+        F: Fn(&T, &T) -> R;
+
+    fn dist_internal<C, I>(
+        &self,
+        aindex: usize,
+        bindex: usize,
+        cache: &mut C,
+        info: &mut I,
+    ) -> DistanceCmp
+    where
+        C: Cache,
+        I: Info,
+    {
+        info.log_dist(aindex);
+        info.log_dist(bindex);
+        let key = Key::new(aindex, bindex);
+        match cache.get(&key) {
+            Some(res) => {
+                info.log_cache_access(false);
+                res
+            }
+            None => {
+                info.log_cache_access(true);
+                let res = self.with_pair(aindex, bindex, |embed_a, embed_b| {
+                    self.distance().distance_cmp(embed_a, embed_b)
+                });
+                cache.put(Key::new(aindex, bindex), res);
+                res
+            }
+        }
+    }
+
+    fn all(&self) -> std::ops::Range<usize>;
+
+    fn distance(&self) -> D;
 
     fn hash_embed<H>(&self, index: usize, hasher: &mut H)
     where
@@ -100,6 +125,8 @@ where
             .for_each(|ix| self.hash_embed(ix, &mut hasher));
         format!("{hash:x}", hash = hasher.finalize())
     }
+
+    fn subrange(&self, new_range: std::ops::Range<usize>) -> Result<Self, InvalidRangeError>;
 }
 
 #[derive(Hash, Eq, PartialEq, Debug)]
@@ -120,80 +147,25 @@ impl Key {
 pub trait Cache {
     fn get(&mut self, key: &Key) -> Option<DistanceCmp>;
     fn put(&mut self, key: Key, value: DistanceCmp);
-
-    fn cached_dist<T, F, I>(
-        &mut self,
-        a: &Embedding<T>,
-        b: &Embedding<T>,
-        dist: F,
-        info: &mut I,
-    ) -> DistanceCmp
-    where
-        F: Fn(&Embedding<T>, &Embedding<T>) -> DistanceCmp,
-        I: Info,
-    {
-        let mut compute = |a, b| {
-            info.log_cache_access(true);
-            dist(a, b)
-        };
-
-        match (a.index, b.index) {
-            (None, _) => compute(a, b),
-            (_, None) => compute(a, b),
-            (Some(index_a), Some(index_b)) => {
-                let key = Key::new(index_a, index_b);
-                match self.get(&key) {
-                    Some(res) => {
-                        info.log_cache_access(false);
-                        res
-                    }
-                    None => {
-                        let res = compute(a, b);
-                        self.put(Key::new(index_a, index_b), res);
-                        res
-                    }
-                }
-            }
-        }
-    }
-
-    fn cached_distance<'a, D, T, I>(
-        &mut self,
-        a: &Embedding<T>,
-        b: &Embedding<T>,
-        distance: D,
-        info: &mut I,
-    ) -> DistanceCmp
-    where
-        D: Distance<T> + Copy,
-        T: 'a,
-        I: Info,
-    {
-        info.log_dist(&a.index);
-        info.log_dist(&b.index);
-        self.cached_dist(&a, &b, |a, b| distance.distance_cmp(a, b), info)
-    }
 }
 
 pub struct LocalDistance<'a, E, D, T>
 where
-    E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T> + Copy,
-    T: 'a,
+    E: EmbeddingProvider<D, T>,
+    D: Distance<T>,
 {
     provider: &'a E,
-    embed: &'a Embedding<T>,
+    embed: &'a T,
     distance_type: PhantomData<D>,
 }
 
 impl<'a, E, D, T> LocalDistance<'a, E, D, T>
 where
-    E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T> + Copy,
-    T: 'a,
+    E: EmbeddingProvider<D, T>,
+    D: Distance<T>,
 {
-    pub fn new(provider: &'a E, embed: &'a Embedding<T>) -> Self {
-        LocalDistance {
+    pub fn new(provider: &'a E, embed: &'a T) -> Self {
+        Self {
             provider,
             embed,
             distance_type: PhantomData,
@@ -204,9 +176,10 @@ where
     where
         I: Info,
     {
-        info.log_dist(&Some(index));
+        info.log_dist(index);
         let distance = self.provider.distance();
-        distance.distance_cmp(self.embed, &self.provider.get(index))
+        self.provider
+            .with_embed(index, |other| distance.distance_cmp(&self.embed, other))
     }
 
     pub fn finalize_distance(&self, dist_cmp: &DistanceCmp) -> f64 {
@@ -215,16 +188,12 @@ where
     }
 }
 
-pub trait NearestNeighbors<'a, T>
+pub trait NearestNeighbors<E, D, T>
 where
-    T: 'a,
+    E: EmbeddingProvider<D, T>,
+    D: Distance<T>,
 {
-    fn get_closest<I>(
-        &self,
-        other: &'a Embedding<T>,
-        count: usize,
-        info: &mut I,
-    ) -> Vec<(usize, f64)>
+    fn get_closest<I>(&self, other: &T, count: usize, info: &mut I) -> Vec<(usize, f64)>
     where
         I: Info;
 }

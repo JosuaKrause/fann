@@ -5,5 +5,8 @@ pub mod info;
 mod fann;
 pub use fann::*;
 
+mod forest;
+pub use forest::*;
+
 mod base;
 pub use base::*;

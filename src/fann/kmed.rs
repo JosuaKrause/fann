@@ -1,50 +1,12 @@
-use rayon::prelude::*;
 use serde::{self, Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
     iter::repeat,
 };
-use zip::{result::ZipError, write::FileOptions};
 
 use crate::{
-    info::Info, Cache, Distance, DistanceCmp, Embedding, EmbeddingProvider, LocalDistance, Tree,
+    info::Info, BuildParams, Cache, Distance, DistanceCmp, EmbeddingProvider, LocalDistance, Tree,
 };
-
-#[derive(Debug)]
-pub enum TreeLoadError {
-    ZipError(ZipError),
-    SerdeError(serde_json::Error),
-}
-
-impl From<ZipError> for TreeLoadError {
-    fn from(value: ZipError) -> Self {
-        TreeLoadError::ZipError(value)
-    }
-}
-
-impl From<serde_json::Error> for TreeLoadError {
-    fn from(value: serde_json::Error) -> Self {
-        TreeLoadError::SerdeError(value)
-    }
-}
-
-#[derive(Debug)]
-pub enum TreeWriteError {
-    ZipError(ZipError),
-    SerdeError(serde_json::Error),
-}
-
-impl From<ZipError> for TreeWriteError {
-    fn from(value: ZipError) -> Self {
-        TreeWriteError::ZipError(value)
-    }
-}
-
-impl From<serde_json::Error> for TreeWriteError {
-    fn from(value: serde_json::Error) -> Self {
-        TreeWriteError::SerdeError(value)
-    }
-}
 
 const HIGHLIGHT_A: &str = "*";
 const HIGHLIGHT_B: &str = ":";
@@ -72,35 +34,8 @@ impl Node {
         }
     }
 
-    fn get_embed<'a, E, D, T>(&self, provider: &'a E) -> Embedding<T>
-    where
-        E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
-        T: 'a,
-    {
-        provider.get(self.centroid_index)
-    }
-
     fn is_before_leaf(&self) -> bool {
         self.children.iter().all(|c| c.node.children.is_empty())
-    }
-
-    fn get_internal_dist<'a, E, D, T, C, I>(
-        &self,
-        embed: &Embedding<T>,
-        provider: &'a E,
-        cache: &mut C,
-        info: &mut I,
-    ) -> DistanceCmp
-    where
-        E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
-        T: 'a,
-        C: Cache,
-        I: Info,
-    {
-        let distance = provider.distance();
-        cache.cached_distance(&self.get_embed(provider), embed, distance, info)
     }
 
     fn get_dist<'a, E, D, T, I>(
@@ -109,9 +44,8 @@ impl Node {
         info: &mut I,
     ) -> DistanceCmp
     where
-        E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
-        T: 'a,
+        E: EmbeddingProvider<D, T>,
+        D: Distance<T>,
         I: Info,
     {
         ldist.distance_cmp(self.centroid_index, info)
@@ -138,20 +72,15 @@ impl Node {
             .unwrap_or(DistanceCmp::zero());
     }
 
-    fn add_child<'a, E, D, T, C, I>(
-        &mut self,
-        child: Node,
-        provider: &'a E,
-        cache: &mut C,
-        info: &mut I,
-    ) where
-        E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
-        T: 'a,
+    fn add_child<E, D, T, C, I>(&mut self, child: Node, provider: &E, cache: &mut C, info: &mut I)
+    where
+        E: EmbeddingProvider<D, T>,
+        D: Distance<T>,
         C: Cache,
         I: Info,
     {
-        let center_dist = self.get_internal_dist(&child.get_embed(provider), provider, cache, info);
+        let center_dist =
+            provider.dist_internal(self.centroid_index, child.centroid_index, cache, info);
         self.children.push(Child {
             node: child,
             center_dist,
@@ -168,9 +97,8 @@ impl Node {
         ldist: &LocalDistance<'a, E, D, T>,
         info: &mut I,
     ) where
-        E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
-        T: 'a,
+        E: EmbeddingProvider<D, T>,
+        D: Distance<T>,
         I: Info,
     {
         fn max_dist(res: &Vec<(usize, DistanceCmp)>, count: usize) -> DistanceCmp {
@@ -343,33 +271,15 @@ pub struct FannTree {
 }
 
 impl FannTree {
-    fn get_dist<'a, E, D, T, C, I>(
+    fn centroid<E, D, T, C, I>(
         provider: &E,
-        embed_a: &Embedding<T>,
-        embed_b: &Embedding<T>,
-        cache: &mut C,
-        info: &mut I,
-    ) -> DistanceCmp
-    where
-        E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
-        T: 'a,
-        C: Cache,
-        I: Info,
-    {
-        cache.cached_distance(embed_a, embed_b, provider.distance(), info)
-    }
-
-    fn centroid<'a, E, D, T, C, I>(
-        provider: &'a E,
         all_ixs: &Vec<usize>,
         cache: &mut C,
         info: &mut I,
     ) -> usize
     where
-        E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
-        T: 'a,
+        E: EmbeddingProvider<D, T>,
+        D: Distance<T>,
         C: Cache,
         I: Info,
     {
@@ -378,15 +288,13 @@ impl FannTree {
                 .iter()
                 .fold((None, DistanceCmp::of(f64::INFINITY)), |best, &ix| {
                     let (best_ix, best_dist) = best;
-                    let embed = provider.get(ix);
                     let cur_dist: DistanceCmp =
                         all_ixs.iter().fold(DistanceCmp::zero(), |res, &oix| {
                             if oix == ix || res > best_dist {
                                 res
                             } else {
-                                let oembed = provider.get(oix);
                                 res.combine(
-                                    &Self::get_dist(provider, &embed, &oembed, cache, info),
+                                    &provider.dist_internal(ix, oix, cache, info),
                                     |cur, dist| cur + dist,
                                 )
                             }
@@ -400,8 +308,8 @@ impl FannTree {
         res_ix.unwrap()
     }
 
-    fn kmedoid<'a, E, D, T, C, I>(
-        provider: &'a E,
+    fn kmedoid<E, D, T, C, I>(
+        provider: &E,
         all_ixs: Vec<usize>,
         init_centroids: Option<Vec<usize>>,
         k_num: usize,
@@ -409,9 +317,8 @@ impl FannTree {
         info: &mut I,
     ) -> Vec<(usize, Vec<usize>)>
     where
-        E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
-        T: 'a,
+        E: EmbeddingProvider<D, T>,
+        D: Distance<T>,
         C: Cache,
         I: Info,
     {
@@ -435,14 +342,11 @@ impl FannTree {
                 .iter()
                 .filter(|&ix| !centroids.contains(ix))
                 .for_each(|&ix| {
-                    let embed = provider.get(ix);
                     let (_, best) = res
                         .iter_mut()
                         .min_by(|(a, _), (b, _)| {
-                            let dist_a =
-                                Self::get_dist(provider, &embed, &provider.get(*a), cache, info);
-                            let dist_b =
-                                Self::get_dist(provider, &embed, &provider.get(*b), cache, info);
+                            let dist_a = provider.dist_internal(ix, *a, cache, info);
+                            let dist_b = provider.dist_internal(ix, *b, cache, info);
                             dist_a.cmp(&dist_b)
                         })
                         .unwrap();
@@ -460,8 +364,7 @@ impl FannTree {
                 .iter()
                 .map(|(_, assignments)| Self::centroid(provider, assignments, cache, info))
                 .collect();
-            if buff.par_iter().any(|old_cs| *old_cs == new_cs) {
-                // TODO use par for actually useful things
+            if buff.iter().any(|old_cs| *old_cs == new_cs) {
                 done = true;
             }
             while buff.len() >= buff_size {
@@ -475,19 +378,17 @@ impl FannTree {
         ixs.retain(|&ix| ix != index);
     }
 
-    fn build_level<'a, E, D, T, C, I>(
-        provider: &'a E,
+    fn build_level<E, D, T, C, I>(
+        provider: &E,
         cache: &mut C,
         info: &mut I,
         cur_root_ix: usize,
         cur_all_ixs: Vec<usize>,
         max_node_size: usize,
-        pre_cluster: Option<usize>,
     ) -> Node
     where
-        E: EmbeddingProvider<'a, D, T>,
-        D: Distance<T> + Copy,
-        T: 'a,
+        E: EmbeddingProvider<D, T>,
+        D: Distance<T>,
         C: Cache,
         I: Info,
     {
@@ -504,33 +405,7 @@ impl FannTree {
                 node.add_child(cnode, provider, cache, info);
             });
         } else {
-            // TODO pre_cluster makes things slower
-            let init_centroids = match pre_cluster {
-                Some(pre_cluster) => {
-                    if cur_all_ixs.len() <= pre_cluster * num_k * 2 {
-                        None
-                    } else {
-                        Some(
-                            Self::kmedoid(
-                                provider,
-                                cur_all_ixs
-                                    .iter()
-                                    .take(pre_cluster * num_k)
-                                    .map(|&cix| cix)
-                                    .collect(),
-                                None,
-                                num_k,
-                                cache,
-                                info,
-                            )
-                            .into_iter()
-                            .map(|(cix, _)| cix)
-                            .collect(),
-                        )
-                    }
-                }
-                None => None,
-            };
+            let init_centroids = None;
             Self::kmedoid(provider, cur_all_ixs, init_centroids, num_k, cache, info)
                 .into_iter()
                 .for_each(|(centroid_ix, mut assignments)| {
@@ -542,7 +417,6 @@ impl FannTree {
                         centroid_ix,
                         assignments,
                         max_node_size,
-                        pre_cluster,
                     );
                     node.add_child(child_node, provider, cache, info);
                 });
@@ -550,44 +424,26 @@ impl FannTree {
         node.compute_radius();
         node
     }
-
-    pub fn load(file: &std::fs::File) -> Result<Self, TreeLoadError> {
-        let mut archive = zip::ZipArchive::new(file)?;
-        let zip_file = archive.by_name("tree.json")?;
-        let res: Self = serde_json::from_reader(zip_file)?;
-        Ok(res)
-    }
-
-    pub fn save(&self, file: &std::fs::File) -> Result<(), TreeWriteError> {
-        let mut zip = zip::ZipWriter::new(file);
-        let options = FileOptions::default()
-            .compression_method(zip::CompressionMethod::Bzip2)
-            .unix_permissions(0o755);
-        zip.start_file("tree.json", options)?;
-        serde_json::to_writer(zip, self)?;
-        Ok(())
-    }
 }
 
-impl<'a, E, D, T> Tree<'a, E, D, T> for FannTree
+pub struct FannBuildParams {
+    pub max_node_size: Option<usize>,
+}
+
+impl BuildParams for FannBuildParams {}
+
+impl<E, D, T> Tree<FannBuildParams, E, D, T> for FannTree
 where
-    E: EmbeddingProvider<'a, D, T>,
-    D: Distance<T> + Copy,
-    T: 'a,
+    E: EmbeddingProvider<D, T>,
+    D: Distance<T>,
 {
-    fn build<C, I>(
-        provider: &'a E,
-        max_node_size: Option<usize>,
-        pre_cluster: Option<usize>,
-        cache: &mut C,
-        info: &mut I,
-    ) -> Self
+    fn build<C, I>(provider: &E, params: &FannBuildParams, cache: &mut C, info: &mut I) -> Self
     where
         C: Cache,
         I: Info,
     {
         let mut all_ixs: Vec<usize> = provider.all().collect();
-        let max_node_size = match max_node_size {
+        let max_node_size = match params.max_node_size {
             Some(max_node_size) => max_node_size,
             None => all_ixs.len(),
         };
@@ -595,15 +451,7 @@ where
 
         Self::remove(&mut all_ixs, root_ix);
         Self {
-            root: Self::build_level(
-                provider,
-                cache,
-                info,
-                root_ix,
-                all_ixs,
-                max_node_size,
-                pre_cluster,
-            ),
+            root: Self::build_level(provider, cache, info, root_ix, all_ixs, max_node_size),
             hash: provider.compute_hash(),
             distance_name: provider.distance().name().to_string(),
         }
@@ -647,7 +495,7 @@ where
             .join("\n")
     }
 
-    fn get_closest<I>(
+    fn get_closest<'a, I>(
         &self,
         count: usize,
         ldist: &LocalDistance<'a, E, D, T>,
