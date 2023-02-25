@@ -133,10 +133,14 @@ where
         I: Info,
     {
         let mut dists: Vec<(usize, DistanceCmp)> = self
-            .embeddings
-            .iter()
+            .all()
             .enumerate()
-            .map(|(ix, cur)| (ix, self.distance.distance_cmp(cur, &other)))
+            .map(|(ix, cur_ix)| {
+                (
+                    ix,
+                    self.distance.distance_cmp(&self.embeddings[cur_ix], &other),
+                )
+            })
             .collect();
         dists.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
         dists

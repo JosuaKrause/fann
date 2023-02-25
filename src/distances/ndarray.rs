@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use digest::Digest;
-use ndarray::{Array1, ArrayBase, ArrayView1, Data, Ix2};
+use ndarray::{Array1, ArrayBase, ArrayView1, Axis, Data, Ix2, Slice};
 
 use crate::{
     info::Info, Distance, DistanceCmp, EmbeddingProvider, InvalidRangeError, NearestNeighbors,
@@ -147,7 +147,11 @@ where
     where
         I: Info,
     {
-        let dists: Array1<DistanceCmp> = self.arr.dot(other).map(|v| DistanceCmp::of((-v).exp()));
+        let dists: Array1<DistanceCmp> = self
+            .arr
+            .slice_axis(Axis(0), Slice::from(self.all()))
+            .dot(other)
+            .map(|v| DistanceCmp::of((-v).exp()));
         let mut indices: Vec<usize> = (0..dists.len()).collect();
         indices.sort_unstable_by_key(|&ix| dists[ix]);
         indices
