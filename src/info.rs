@@ -52,7 +52,7 @@ pub struct BaseInfo {
     hits: u64,
     miss: u64,
     scan_map: HashMap<usize, &'static str>,
-    dist_set: HashSet<usize>,
+    dist_set: Vec<usize>,
 }
 
 impl BaseInfo {
@@ -61,7 +61,7 @@ impl BaseInfo {
             hits: 0,
             miss: 0,
             scan_map: HashMap::new(),
-            dist_set: HashSet::new(),
+            dist_set: Vec::new(),
         }
     }
 }
@@ -82,7 +82,7 @@ impl Info for BaseInfo {
     }
 
     fn log_dist(&mut self, index: usize) {
-        self.dist_set.insert(index);
+        self.dist_set.push(index);
     }
 
     fn cache_hits_miss(&self) -> (u64, u64) {
@@ -94,7 +94,8 @@ impl Info for BaseInfo {
     }
 
     fn dist_vec(&self) -> Vec<usize> {
-        self.dist_set.iter().map(|&ix| ix).collect()
+        let set: HashSet<usize> = HashSet::from_iter(self.dist_set.iter().map(|&ix| ix));
+        set.into_iter().collect()
     }
 
     fn dist_count(&self) -> usize {
@@ -105,6 +106,6 @@ impl Info for BaseInfo {
         self.hits = 0;
         self.miss = 0;
         self.scan_map = HashMap::new();
-        self.dist_set = HashSet::new();
+        self.dist_set = Vec::new();
     }
 }

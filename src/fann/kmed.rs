@@ -1,11 +1,13 @@
 use serde::{self, Deserialize, Serialize};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BinaryHeap, HashMap, VecDeque},
     iter::repeat,
 };
 
 use crate::{
-    info::Info, BuildParams, Cache, Distance, DistanceCmp, EmbeddingProvider, LocalDistance, Tree,
+    algo::{StreamingElement, StreamingNode},
+    info::Info,
+    BuildParams, Cache, Distance, DistanceCmp, EmbeddingProvider, LocalDistance, Tree,
 };
 
 const HIGHLIGHT_A: &str = "*";
@@ -19,7 +21,7 @@ struct Child {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Node {
+pub struct Node {
     centroid_index: usize,
     radius: DistanceCmp,
     children: Vec<Child>,
@@ -260,6 +262,38 @@ impl Node {
             })
             .flatten()
             .collect::<Vec<String>>()
+    }
+}
+
+impl StreamingNode for Node {
+    fn get_index(&self) -> usize {
+        self.centroid_index
+    }
+
+    fn get_radius(&self) -> DistanceCmp {
+        self.radius
+    }
+
+    fn get_min_distance(&self, dist_cmp: &DistanceCmp) -> DistanceCmp {
+        dist_cmp.combine(&self.radius, |d, radius| f64::max(0.0, d - radius))
+    }
+
+    fn with_children<'a, F, I>(
+        &'a self,
+        apply: F,
+        queue: &mut BinaryHeap<StreamingElement<'a, Self>>,
+        info: &mut I,
+    ) where
+        F: Fn(&'a Self, &DistanceCmp, &mut I) -> Option<StreamingElement<'a, Self>>,
+        I: Info,
+        Self: Sized + 'a,
+    {
+        for child in &self.children {
+            match apply(&child.node, &child.center_dist, info) {
+                Some(elem) => queue.push(elem),
+                None => {}
+            }
+        }
     }
 }
 
@@ -515,5 +549,9 @@ where
 
     fn fingerprint(&self) -> (&str, &str) {
         (&self.hash, &self.distance_name)
+    }
+
+    fn get_root(&self) -> &Node {
+        &self.root
     }
 }
