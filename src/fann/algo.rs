@@ -132,7 +132,7 @@ where
     R: StreamingNode,
 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.dist_min().cmp(&other.dist_min())
+        self.dist_min().cmp(&other.dist_min()).reverse()
     }
 }
 
