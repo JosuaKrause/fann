@@ -224,6 +224,9 @@ where
         let mut queue: BinaryHeap<StreamingElement<'a, R>> = BinaryHeap::from(roots);
 
         fn max_dist(res: &Vec<(usize, DistanceCmp)>, count: usize) -> DistanceCmp {
+            if res.len() == 0 {
+                return DistanceCmp::inf();
+            }
             let index = count.min(res.len()) - 1;
             res[index].1
         }

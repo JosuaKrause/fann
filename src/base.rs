@@ -1,4 +1,4 @@
-use std::{fmt, marker::PhantomData};
+use std::{f64::INFINITY, fmt, marker::PhantomData};
 
 use blake2::Blake2s256;
 use digest::Digest;
@@ -12,6 +12,10 @@ pub struct DistanceCmp(f64);
 impl DistanceCmp {
     pub fn zero() -> Self {
         DistanceCmp(0.0)
+    }
+
+    pub fn inf() -> Self {
+        DistanceCmp(INFINITY)
     }
 
     pub fn of(v: f64) -> Self {
