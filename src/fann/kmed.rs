@@ -282,14 +282,20 @@ impl StreamingNode for Node {
         &'a self,
         apply: F,
         queue: &mut BinaryHeap<StreamingElement<'a, Self>>,
+        res: &mut Vec<(usize, DistanceCmp)>,
         info: &mut I,
     ) where
-        F: Fn(&'a Self, &DistanceCmp, &mut I) -> Option<StreamingElement<'a, Self>>,
+        F: Fn(
+            &'a Self,
+            &DistanceCmp,
+            &mut Vec<(usize, DistanceCmp)>,
+            &mut I,
+        ) -> Option<StreamingElement<'a, Self>>,
         I: Info,
         Self: Sized + 'a,
     {
         for child in &self.children {
-            match apply(&child.node, &child.center_dist, info) {
+            match apply(&child.node, &child.center_dist, res, info) {
                 Some(elem) => queue.push(elem),
                 None => {}
             }

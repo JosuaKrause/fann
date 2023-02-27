@@ -24,9 +24,15 @@ pub trait StreamingNode {
         &'a self,
         apply: F,
         queue: &mut BinaryHeap<StreamingElement<'a, Self>>,
+        res: &mut Vec<(usize, DistanceCmp)>,
         info: &mut I,
     ) where
-        F: Fn(&'a Self, &DistanceCmp, &mut I) -> Option<StreamingElement<'a, Self>>,
+        F: Fn(
+            &'a Self,
+            &DistanceCmp,
+            &mut Vec<(usize, DistanceCmp)>,
+            &mut I,
+        ) -> Option<StreamingElement<'a, Self>>,
         I: Info,
         Self: Sized + 'a;
 
@@ -82,12 +88,18 @@ where
         &self,
         apply: F,
         queue: &mut BinaryHeap<StreamingElement<'a, R>>,
+        res: &mut Vec<(usize, DistanceCmp)>,
         info: &mut I,
     ) where
-        F: Fn(&'a R, &DistanceCmp, &mut I) -> Option<StreamingElement<'a, R>>,
+        F: Fn(
+            &'a R,
+            &DistanceCmp,
+            &mut Vec<(usize, DistanceCmp)>,
+            &mut I,
+        ) -> Option<StreamingElement<'a, R>>,
         I: Info,
     {
-        self.elem.with_children(apply, queue, info)
+        self.elem.with_children(apply, queue, res, info)
     }
 
     fn get_cached_dist(&self) -> DistanceCmp {
@@ -172,45 +184,6 @@ where
 
     fn create_local_distance<'a>(&'a self, other: &'a T) -> LocalDistance<'a, E, D, T>;
 
-    fn enqueue_closest<'a, I>(
-        elem: &StreamingElement<'a, R>,
-        max_dist: DistanceCmp,
-        ldist: &LocalDistance<'a, E, D, T>,
-        queue: &mut BinaryHeap<StreamingElement<'a, R>>,
-        info: &mut I,
-    ) where
-        I: Info,
-    {
-        let own_dist = elem.get_cached_dist();
-        let is_outer = elem.get_radius() < own_dist;
-        info.log_scan(elem.get_index(), is_outer);
-        if is_outer {
-            elem.with_children(
-                |child, &center_dist, _| {
-                    let c_dist_est = own_dist.combine(&center_dist, |own, center| own - center);
-                    if max_dist < c_dist_est {
-                        return None;
-                    }
-                    Some(StreamingElement::with_estimate(&child, c_dist_est))
-                },
-                queue,
-                info,
-            );
-        } else {
-            elem.with_children(
-                |child, _, info| {
-                    let celem = StreamingElement::new(child, ldist, info);
-                    if max_dist < celem.dist_min() {
-                        return None;
-                    }
-                    Some(celem)
-                },
-                queue,
-                info,
-            );
-        }
-    }
-
     fn compute_closest<'a, I>(
         roots: Vec<StreamingElement<'a, R>>,
         ldist: &LocalDistance<'a, E, D, T>,
@@ -220,15 +193,11 @@ where
     where
         I: Info,
     {
-        let mut res: Vec<(usize, DistanceCmp)> = Vec::with_capacity(count + 1);
-        let mut queue: BinaryHeap<StreamingElement<'a, R>> = BinaryHeap::from(roots);
-
         fn max_dist(res: &Vec<(usize, DistanceCmp)>, count: usize) -> DistanceCmp {
-            if res.len() == 0 {
+            if res.len() < count {
                 return DistanceCmp::inf();
             }
-            let index = count.min(res.len()) - 1;
-            res[index].1
+            res[res.len() - 1].1
         }
 
         fn add_node<'a, R>(
@@ -248,22 +217,57 @@ where
             res.truncate(count);
         }
 
-        loop {
-            let mut cur = match queue.pop() {
-                Some(elem) => elem,
-                None => break,
-            };
-            let res_max = max_dist(&res, count);
-            if cur.dist_min() > res_max {
+        let mut res: Vec<(usize, DistanceCmp)> = Vec::with_capacity(count + 1);
+        // roots
+        //     .iter()
+        //     .for_each(|root| add_node(&mut res, root, count));
+        let mut queue: BinaryHeap<StreamingElement<'a, R>> = BinaryHeap::from(roots);
+        while let Some(mut cur) = queue.pop() {
+            if cur.dist_min() > max_dist(&res, count) {
                 break;
             }
             cur.get_distance(ldist, info);
             let cur = cur;
-            if res.len() < count || cur.get_cached_dist() < res_max {
+            if cur.get_cached_dist() < max_dist(&res, count) {
                 add_node(&mut res, &cur, count);
             }
-            let res_max = max_dist(&res, count);
-            Self::enqueue_closest(&cur, res_max, ldist, &mut queue, info);
+            let own_dist = cur.get_cached_dist();
+            let is_outer = cur.get_radius() < own_dist;
+            info.log_scan(cur.get_index(), is_outer);
+            if is_outer {
+                cur.with_children(
+                    |child, &center_dist, res, info| {
+                        let c_dist_est = own_dist.combine(&center_dist, |own, center| own - center);
+                        if max_dist(res, count) < c_dist_est {
+                            return None;
+                        }
+                        let celem = StreamingElement::with_estimate(child, c_dist_est);
+                        // let celem = StreamingElement::new(child, ldist, info);
+                        // if max_dist(res, count) < celem.dist_min() {
+                        //     return None;
+                        // }
+                        // add_node(res, &celem, count);
+                        Some(celem)
+                    },
+                    &mut queue,
+                    &mut res,
+                    info,
+                );
+            } else {
+                cur.with_children(
+                    |child, _, res, info| {
+                        let celem = StreamingElement::new(child, ldist, info);
+                        if max_dist(res, count) < celem.dist_min() {
+                            return None;
+                        }
+                        // add_node(res, &celem, count);
+                        Some(celem)
+                    },
+                    &mut queue,
+                    &mut res,
+                    info,
+                );
+            }
         }
         res.into_iter()
             .map(|(ix, dist)| (ix, ldist.finalize_distance(&dist)))
