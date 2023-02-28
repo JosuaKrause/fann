@@ -64,7 +64,7 @@ fn main() {
     let main_provider = provider.subrange(0..total_size).unwrap();
 
     let t_build = Instant::now();
-    let tfilename = format!("tree-{}.zip", total_size);
+    let tfilename = format!("tree-{}-{}.zip", total_size, max_tree);
     let tfile = std::path::Path::new(&tfilename);
     let mut cache = DistanceCache::new(1000000);
     let params = FannBuildParams {
@@ -78,7 +78,7 @@ fn main() {
             .load_all(&mut file, false, &params, &mut cache, &mut info, force)
             .unwrap();
     } else {
-        forest.build_all(&params, &mut cache, &mut info);
+        forest.build_all(&params, &mut cache, &mut no_info());
         let mut file = std::fs::File::create(tfile).unwrap();
         forest.save_all(&mut file).unwrap();
     }
@@ -94,6 +94,11 @@ fn main() {
     info.clear();
 
     let embed = df.row(total_size);
+
+    let t_search_no_info = Instant::now();
+    let closest_ni = forest.get_closest(&embed, 10, &mut no_info());
+    println!("search (no info) took {:?}", t_search_no_info.elapsed());
+    println!("{:?}", closest_ni);
 
     let t_search = Instant::now();
     let closest = forest.get_closest(&embed, 10, &mut info);
@@ -113,6 +118,14 @@ fn main() {
         );
     }
     info.clear();
+
+    let t_search_stream_no_info = Instant::now();
+    let closest_stream_ni = forest.get_closest_stream(&embed, 10, &mut no_info());
+    println!(
+        "stream search (no info) took {:?}",
+        t_search_stream_no_info.elapsed()
+    );
+    println!("{:?}", closest_stream_ni);
 
     let t_search_stream = Instant::now();
     let closest_stream = forest.get_closest_stream(&embed, 10, &mut info);
