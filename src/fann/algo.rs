@@ -191,7 +191,7 @@ where
             if is_outer {
                 cur.with_children(
                     |child, &center_dist, res, info| {
-                        let c_dist_est = own_dist.combine(&center_dist, |own, center| own - center);
+                        let c_dist_est = own_dist - center_dist;
                         if max_dist(res, count) < c_dist_est {
                             return None;
                         }
@@ -208,7 +208,11 @@ where
                 );
             } else {
                 cur.with_children(
-                    |child, _, res, info| {
+                    |child, &center_dist, res, info| {
+                        let c_dist_est = center_dist - own_dist;
+                        if max_dist(res, count) < c_dist_est {
+                            return None;
+                        }
                         let celem = StreamingElement::new(child, ldist, info);
                         if max_dist(res, count) < celem.dist_min() {
                             return None;

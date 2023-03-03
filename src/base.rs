@@ -1,4 +1,9 @@
-use std::{f64::INFINITY, fmt, marker::PhantomData};
+use std::{
+    f64::INFINITY,
+    fmt,
+    marker::PhantomData,
+    ops::{Add, Sub},
+};
 
 use blake2::Blake2s256;
 use digest::Digest;
@@ -19,18 +24,27 @@ impl DistanceCmp {
     }
 
     pub fn of(v: f64) -> Self {
-        DistanceCmp(v)
+        DistanceCmp(v.max(0.0))
     }
 
     pub fn to(&self) -> f64 {
         self.0
     }
+}
 
-    pub fn combine<F>(&self, other: &Self, map: F) -> Self
-    where
-        F: FnOnce(f64, f64) -> f64,
-    {
-        DistanceCmp::of(map(self.to(), other.to()))
+impl Add for DistanceCmp {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::of(self.to() + rhs.to())
+    }
+}
+
+impl Sub for DistanceCmp {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self {
+        Self::of(self.to() - rhs.to())
     }
 }
 

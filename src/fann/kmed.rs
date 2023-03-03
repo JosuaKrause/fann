@@ -53,16 +53,12 @@ impl Node {
         ldist.distance_cmp(self.centroid_index, info)
     }
 
-    fn get_dist_min(&self, dist: &DistanceCmp) -> DistanceCmp {
-        dist.combine(&self.radius, |d, radius| f64::max(0.0, d - radius))
+    fn get_dist_min(&self, &dist: &DistanceCmp) -> DistanceCmp {
+        dist - self.radius
     }
 
     fn get_child_dist_max(child: &Child) -> DistanceCmp {
-        child
-            .center_dist
-            .combine(&child.node.radius, |center_dist, radius| {
-                center_dist + radius
-            })
+        child.center_dist + child.node.radius
     }
 
     fn compute_radius(&mut self) {
@@ -130,7 +126,7 @@ impl Node {
         info.log_scan(self.centroid_index, is_outer);
         if is_outer {
             for child in self.children.iter() {
-                let c_dist_est = own_dist.combine(&child.center_dist, |own, center| own - center);
+                let c_dist_est = own_dist - child.center_dist;
                 if max_dist(res, count) < c_dist_est {
                     continue;
                 }
@@ -274,8 +270,8 @@ impl StreamingNode for Node {
         self.radius
     }
 
-    fn get_min_distance(&self, dist_cmp: &DistanceCmp) -> DistanceCmp {
-        dist_cmp.combine(&self.radius, |d, radius| f64::max(0.0, d - radius))
+    fn get_min_distance(&self, &dist_cmp: &DistanceCmp) -> DistanceCmp {
+        dist_cmp - self.radius
     }
 
     fn with_children<'a, F, I>(
@@ -333,10 +329,7 @@ impl FannTree {
                             if oix == ix || res > best_dist {
                                 res
                             } else {
-                                res.combine(
-                                    &provider.dist_internal(ix, oix, cache, info),
-                                    |cur, dist| cur + dist,
-                                )
+                                res + provider.dist_internal(ix, oix, cache, info)
                             }
                         });
                     if best_ix.is_none() || cur_dist < best_dist {
