@@ -5,6 +5,12 @@ use crate::{
     NearestNeighbors, Tree,
 };
 
+use self::{
+    algo::{StreamingElement, StreamingNeighbors},
+    kmed::Node,
+};
+
+pub mod algo;
 pub mod kmed;
 
 pub struct Fann<P, N, E, D, T>
@@ -130,6 +136,7 @@ where
     E: EmbeddingProvider<D, T> + NearestNeighbors<E, D, T>,
     D: Distance<T>,
 {
+    root_provider: E,
     trees: Vec<Fann<P, N, E, D, T>>,
     remain: E,
     param_type: PhantomData<P>,
@@ -142,8 +149,9 @@ where
     E: EmbeddingProvider<D, T> + NearestNeighbors<E, D, T>,
     D: Distance<T>,
 {
-    fn create_from(trees: Vec<Fann<P, N, E, D, T>>, remain: E) -> Self {
+    fn create_from(root_provider: E, trees: Vec<Fann<P, N, E, D, T>>, remain: E) -> Self {
         Self {
+            root_provider,
             trees,
             remain,
             param_type: PhantomData,
@@ -164,5 +172,39 @@ where
 
     fn get_remain(&self) -> &E {
         &self.remain
+    }
+
+    fn get_root_provider<'a>(&'a self) -> &'a E {
+        &self.root_provider
+    }
+}
+
+impl<P, N, E, D, T> StreamingNeighbors<E, D, T, Node> for FannForest<P, N, E, D, T>
+where
+    P: BuildParams,
+    N: Tree<P, E, D, T>,
+    E: EmbeddingProvider<D, T> + NearestNeighbors<E, D, T>,
+    D: Distance<T>,
+{
+    fn create_local_distance<'a>(&'a self, other: &'a T) -> LocalDistance<'a, E, D, T> {
+        LocalDistance::new(self.get_root_provider(), other)
+    }
+
+    fn get_roots<'a, I>(
+        &'a self,
+        ldist: &LocalDistance<'a, E, D, T>,
+        info: &mut I,
+    ) -> Vec<StreamingElement<'a, Node>>
+    where
+        I: Info,
+    {
+        self.get_trees()
+            .iter()
+            .map(|tree| {
+                let root = tree.get_tree().as_ref().unwrap();
+                let root_node = root.get_root();
+                StreamingElement::new(root_node, &ldist, info)
+            })
+            .collect()
     }
 }

@@ -1,6 +1,8 @@
 use std::fmt;
 
-use crate::{info::Info, Cache, Distance, EmbeddingProvider, LocalDistance, NearestNeighbors};
+use crate::{
+    info::Info, kmed::Node, Cache, Distance, EmbeddingProvider, LocalDistance, NearestNeighbors,
+};
 use rayon::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
 use zip::{result::ZipError, write::FileOptions};
@@ -129,6 +131,8 @@ where
         serde_json::to_writer(writer, self)?;
         Ok(())
     }
+
+    fn get_root(&self) -> &Node;
 }
 
 pub trait Buildable<P, N, E, D, T>
@@ -186,24 +190,24 @@ where
     B: Buildable<P, N, E, D, T>,
     Self: Sized,
 {
-    fn create_from(trees: Vec<B>, remain: E) -> Self;
+    fn create_from(root_provider: E, trees: Vec<B>, remain: E) -> Self;
 
     fn create_builder_from(provider: E) -> B;
 
-    fn create(provider: &E, min_tree_size: usize, max_tree_size: usize) -> Self {
-        let all = provider.all();
+    fn create(root_provider: E, min_tree_size: usize, max_tree_size: usize) -> Self {
+        let all = root_provider.all();
         let is_large_end = all.len() % max_tree_size >= min_tree_size;
         let expected_trees = all.len() / max_tree_size + if is_large_end { 1 } else { 0 };
         let mut trees = Vec::with_capacity(expected_trees);
         let mut start = all.start;
         while start + min_tree_size <= all.end {
             let size = (all.end - start).min(max_tree_size);
-            let cur_provider = provider.subrange(start..(start + size)).unwrap();
+            let cur_provider = root_provider.subrange(start..(start + size)).unwrap();
             trees.push(Self::create_builder_from(cur_provider));
             start += size;
         }
-        let remain = provider.subrange(start..all.end).unwrap();
-        Self::create_from(trees, remain)
+        let remain = root_provider.subrange(start..all.end).unwrap();
+        Self::create_from(root_provider, trees, remain)
     }
 
     fn build_all<C, I>(&mut self, params: &P, cache: &mut C, info: &mut I)
@@ -285,6 +289,8 @@ where
     fn get_trees_mut(&mut self) -> &mut Vec<B>;
 
     fn get_remain(&self) -> &E;
+
+    fn get_root_provider<'a>(&'a self) -> &'a E;
 
     fn get_closest<I>(&self, other: &T, count: usize, info: &mut I) -> Vec<(usize, f64)>
     where

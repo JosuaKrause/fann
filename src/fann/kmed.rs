@@ -1,11 +1,13 @@
 use serde::{self, Deserialize, Serialize};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BinaryHeap, HashMap, VecDeque},
     iter::repeat,
 };
 
 use crate::{
-    info::Info, BuildParams, Cache, Distance, DistanceCmp, EmbeddingProvider, LocalDistance, Tree,
+    algo::{StreamingElement, StreamingNode},
+    info::Info,
+    BuildParams, Cache, Distance, DistanceCmp, EmbeddingProvider, LocalDistance, Tree,
 };
 
 const HIGHLIGHT_A: &str = "*";
@@ -19,7 +21,7 @@ struct Child {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Node {
+pub struct Node {
     centroid_index: usize,
     radius: DistanceCmp,
     children: Vec<Child>,
@@ -51,16 +53,12 @@ impl Node {
         ldist.distance_cmp(self.centroid_index, info)
     }
 
-    fn get_dist_min(&self, dist: &DistanceCmp) -> DistanceCmp {
-        dist.combine(&self.radius, |d, radius| f64::max(0.0, d - radius))
+    fn get_dist_min(&self, &dist: &DistanceCmp) -> DistanceCmp {
+        dist - self.radius
     }
 
     fn get_child_dist_max(child: &Child) -> DistanceCmp {
-        child
-            .center_dist
-            .combine(&child.node.radius, |center_dist, radius| {
-                center_dist + radius
-            })
+        child.center_dist + child.node.radius
     }
 
     fn compute_radius(&mut self) {
@@ -128,7 +126,7 @@ impl Node {
         info.log_scan(self.centroid_index, is_outer);
         if is_outer {
             for child in self.children.iter() {
-                let c_dist_est = own_dist.combine(&child.center_dist, |own, center| own - center);
+                let c_dist_est = own_dist - child.center_dist;
                 if max_dist(res, count) < c_dist_est {
                     continue;
                 }
@@ -263,6 +261,44 @@ impl Node {
     }
 }
 
+impl StreamingNode for Node {
+    fn get_index(&self) -> usize {
+        self.centroid_index
+    }
+
+    fn get_radius(&self) -> DistanceCmp {
+        self.radius
+    }
+
+    fn get_min_distance(&self, &dist_cmp: &DistanceCmp) -> DistanceCmp {
+        dist_cmp - self.radius
+    }
+
+    fn with_children<'a, F, I>(
+        &'a self,
+        apply: F,
+        queue: &mut BinaryHeap<StreamingElement<'a, Self>>,
+        res: &mut Vec<(usize, DistanceCmp)>,
+        info: &mut I,
+    ) where
+        F: Fn(
+            &'a Self,
+            &DistanceCmp,
+            &mut Vec<(usize, DistanceCmp)>,
+            &mut I,
+        ) -> Option<StreamingElement<'a, Self>>,
+        I: Info,
+        Self: Sized + 'a,
+    {
+        for child in &self.children {
+            match apply(&child.node, &child.center_dist, res, info) {
+                Some(elem) => queue.push(elem),
+                None => {}
+            }
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct FannTree {
     root: Node,
@@ -293,10 +329,7 @@ impl FannTree {
                             if oix == ix || res > best_dist {
                                 res
                             } else {
-                                res.combine(
-                                    &provider.dist_internal(ix, oix, cache, info),
-                                    |cur, dist| cur + dist,
-                                )
+                                res + provider.dist_internal(ix, oix, cache, info)
                             }
                         });
                     if best_ix.is_none() || cur_dist < best_dist {
@@ -515,5 +548,9 @@ where
 
     fn fingerprint(&self) -> (&str, &str) {
         (&self.hash, &self.distance_name)
+    }
+
+    fn get_root(&self) -> &Node {
+        &self.root
     }
 }
