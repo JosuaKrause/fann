@@ -74,6 +74,51 @@ pub trait Distance<T> {
     fn name(&self) -> &str;
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DotDistanceCmp(f64);
+
+impl DotDistanceCmp {
+    pub fn inf() -> Self {
+        DotDistanceCmp(INFINITY)
+    }
+
+    pub fn of(v: f64) -> Self {
+        DotDistanceCmp(v)
+    }
+
+    pub fn to(&self) -> f64 {
+        self.0
+    }
+
+    pub fn is_closer_than(&self, other: &DotDistanceCmp) -> bool {
+        self > other
+    }
+}
+
+impl PartialEq for DotDistanceCmp {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for DotDistanceCmp {}
+
+impl PartialOrd for DotDistanceCmp {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DotDistanceCmp {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
+pub trait DotDistance<T> {
+    fn dot_cmp(&self, a: &T, b: &T) -> DotDistanceCmp;
+}
+
 #[derive(Debug, Clone)]
 pub struct InvalidRangeError;
 
@@ -214,4 +259,71 @@ where
     fn get_closest<I>(&self, other: &T, count: usize, info: &mut I) -> Vec<(usize, f64)>
     where
         I: Info;
+}
+
+pub trait DotCache {
+    fn get(&mut self, key: &Key) -> Option<DotDistanceCmp>;
+    fn put(&mut self, key: Key, value: DotDistanceCmp);
+}
+
+pub trait DotEmbeddingProvider<D, T>
+where
+    D: DotDistance<T>,
+    Self: Sized,
+{
+    fn with_embed<F, R>(&self, index: usize, op: F) -> R
+    where
+        F: Fn(&T) -> R;
+
+    fn with_pair<F, R>(&self, a: usize, b: usize, op: F) -> R
+    where
+        F: Fn(&T, &T) -> R;
+
+    fn dist_internal<C, I>(
+        &self,
+        aindex: usize,
+        bindex: usize,
+        cache: &mut C,
+        info: &mut I,
+    ) -> DotDistanceCmp
+    where
+        C: DotCache,
+        I: Info,
+    {
+        info.log_dist(aindex);
+        info.log_dist(bindex);
+        let key = Key::new(aindex, bindex);
+        match cache.get(&key) {
+            Some(res) => {
+                info.log_cache_access(false);
+                res
+            }
+            None => {
+                info.log_cache_access(true);
+                let res = self.with_pair(aindex, bindex, |embed_a, embed_b| {
+                    self.distance().dot_cmp(embed_a, embed_b)
+                });
+                cache.put(Key::new(aindex, bindex), res);
+                res
+            }
+        }
+    }
+
+    fn all(&self) -> std::ops::Range<usize>;
+
+    fn distance(&self) -> D;
+
+    fn hash_embed<H>(&self, index: usize, hasher: &mut H)
+    where
+        H: Digest;
+
+    fn compute_hash(&self) -> String {
+        let mut hasher = Blake2s256::new();
+        let all = self.all();
+        hasher.update(all.start.to_be_bytes());
+        hasher.update(all.end.to_be_bytes());
+        all.into_iter()
+            .for_each(|ix| self.hash_embed(ix, &mut hasher));
+        format!("{hash:x}", hash = hasher.finalize())
+    }
 }

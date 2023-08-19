@@ -11,5 +11,8 @@ pub use forest::*;
 mod base;
 pub use base::*;
 
+mod onion;
+pub use onion::*;
+
 #[cfg(test)]
 mod tests;

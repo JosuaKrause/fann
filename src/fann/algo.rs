@@ -226,9 +226,9 @@ where
         while let Some(mut cur) = queue.pop() {
             cur.update_distance(ldist, info);
             let cur = cur;
-            // if max_dist(&res, count) < cur.dist_min() {
-            //     break;
-            // }
+            if max_dist(&res, count) < cur.dist_min() {
+                break;
+            }
             add_node(&mut res, &cur, count);
             let own_dist = cur.get_distance();
             let is_outer = cur.get_radius() < own_dist;
@@ -236,10 +236,10 @@ where
             if is_outer {
                 cur.with_children(
                     |child, &center_dist, res, info| {
-                        // let c_dist_est = own_dist - center_dist;
-                        // if max_dist(res, count) < c_dist_est {
-                        //     return None;
-                        // }
+                        let c_dist_est = own_dist - center_dist;
+                        if max_dist(res, count) < c_dist_est {
+                            return None;
+                        }
                         // Some(StreamingElement::with_estimate(child, c_dist_est))
                         let celem = StreamingElement::new(child, ldist, info);
                         // if max_dist(res, count) < celem.dist_min() {
@@ -255,10 +255,10 @@ where
             } else {
                 cur.with_children(
                     |child, &center_dist, res, info| {
-                        // let c_dist_est = center_dist - own_dist;
-                        // if max_dist(res, count) < c_dist_est {
-                        //     return None;
-                        // }
+                        let c_dist_est = center_dist - own_dist;
+                        if max_dist(res, count) < c_dist_est {
+                            return None;
+                        }
                         // Some(StreamingElement::with_estimate(child, c_dist_est))
                         let celem = StreamingElement::new(child, ldist, info);
                         // if max_dist(res, count) < celem.dist_min() {
