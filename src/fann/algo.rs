@@ -39,12 +39,17 @@ pub trait StreamingNode {
     fn get_min_distance(&self, dist_cmp: &DistanceCmp) -> DistanceCmp;
 }
 
+pub enum MaybeDistance {
+    Dist(DistanceCmp),
+    DistMinEst(DistanceCmp),
+}
+
 pub struct StreamingElement<'a, R>
 where
     R: StreamingNode,
 {
     elem: &'a R,
-    dist: DistanceCmp,
+    dist: MaybeDistance,
 }
 
 impl<'a, R> StreamingElement<'a, R>
@@ -58,7 +63,17 @@ where
         I: Info,
     {
         let dist = elem.get_distance(ldist, info);
-        Self { elem, dist }
+        Self {
+            elem,
+            dist: MaybeDistance::Dist(dist),
+        }
+    }
+
+    pub fn with_estimate(elem: &'a R, estimate: DistanceCmp) -> Self {
+        Self {
+            elem,
+            dist: MaybeDistance::DistMinEst(estimate),
+        }
     }
 
     pub fn get_index(&self) -> usize {
@@ -88,11 +103,34 @@ where
     }
 
     fn get_distance(&self) -> DistanceCmp {
-        self.dist
+        match self.dist {
+            MaybeDistance::Dist(dist) => dist,
+            MaybeDistance::DistMinEst(_) => {
+                panic!("distance should have been computed at this point")
+            }
+        }
+    }
+
+    fn update_distance<E, D, T, I>(&mut self, ldist: &LocalDistance<'a, E, D, T>, info: &mut I)
+    where
+        E: EmbeddingProvider<D, T>,
+        D: Distance<T>,
+        I: Info,
+    {
+        match self.dist {
+            MaybeDistance::Dist(_) => {}
+            MaybeDistance::DistMinEst(_) => {
+                let res = self.elem.get_distance(ldist, info);
+                self.dist = MaybeDistance::Dist(res);
+            }
+        }
     }
 
     fn dist_min(&self) -> DistanceCmp {
-        self.elem.get_min_distance(&self.dist)
+        match self.dist {
+            MaybeDistance::Dist(dist) => self.elem.get_min_distance(&dist),
+            MaybeDistance::DistMinEst(estimate) => estimate,
+        }
     }
 }
 
@@ -151,8 +189,12 @@ where
         I: Info,
     {
         fn max_dist(res: &Vec<(usize, DistanceCmp)>, count: usize) -> DistanceCmp {
-            let index = count.min(res.len()) - 1;
-            res[index].1
+            if res.len() < count {
+                return DistanceCmp::inf();
+            }
+            res[res.len() - 1].1
+            // let index = count.min(res.len()) - 1;
+            // res[index].1
         }
 
         fn add_node<'a, R>(
@@ -177,29 +219,33 @@ where
 
         let mut res: Vec<(usize, DistanceCmp)> = Vec::with_capacity(count + 1);
         roots.sort_by_key(|root| root.get_distance());
-        roots
-            .iter()
-            .for_each(|root| add_node(&mut res, root, count));
+        // roots
+        //     .iter()
+        //     .for_each(|root| add_node(&mut res, root, count));
         let mut queue: BinaryHeap<StreamingElement<'a, R>> = BinaryHeap::from(roots);
-        while let Some(cur) = queue.pop() {
-            if cur.dist_min() > max_dist(&res, count) {
-                break;
-            }
+        while let Some(mut cur) = queue.pop() {
+            cur.update_distance(ldist, info);
+            let cur = cur;
+            // if max_dist(&res, count) < cur.dist_min() {
+            //     break;
+            // }
+            add_node(&mut res, &cur, count);
             let own_dist = cur.get_distance();
             let is_outer = cur.get_radius() < own_dist;
             info.log_scan(cur.get_index(), is_outer);
             if is_outer {
                 cur.with_children(
                     |child, &center_dist, res, info| {
-                        let c_dist_est = own_dist - center_dist;
-                        if max_dist(res, count) < c_dist_est {
-                            return None;
-                        }
+                        // let c_dist_est = own_dist - center_dist;
+                        // if max_dist(res, count) < c_dist_est {
+                        //     return None;
+                        // }
+                        // Some(StreamingElement::with_estimate(child, c_dist_est))
                         let celem = StreamingElement::new(child, ldist, info);
-                        if max_dist(res, count) < celem.dist_min() {
-                            return None;
-                        }
-                        add_node(res, &celem, count);
+                        // if max_dist(res, count) < celem.dist_min() {
+                        //     return None;
+                        // }
+                        // add_node(res, &celem, count);
                         Some(celem)
                     },
                     &mut queue,
@@ -209,15 +255,16 @@ where
             } else {
                 cur.with_children(
                     |child, &center_dist, res, info| {
-                        let c_dist_est = center_dist - own_dist;
-                        if max_dist(res, count) < c_dist_est {
-                            return None;
-                        }
+                        // let c_dist_est = center_dist - own_dist;
+                        // if max_dist(res, count) < c_dist_est {
+                        //     return None;
+                        // }
+                        // Some(StreamingElement::with_estimate(child, c_dist_est))
                         let celem = StreamingElement::new(child, ldist, info);
-                        if max_dist(res, count) < celem.dist_min() {
-                            return None;
-                        }
-                        add_node(res, &celem, count);
+                        // if max_dist(res, count) < celem.dist_min() {
+                        //     return None;
+                        // }
+                        // add_node(res, &celem, count);
                         Some(celem)
                     },
                     &mut queue,

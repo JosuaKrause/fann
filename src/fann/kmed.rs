@@ -172,7 +172,7 @@ impl Node {
             pad = pad - highlight.len(),
         );
         let rad = if radius {
-            format!("[r:{r}]", r = self.radius.to())
+            format!("[r:{r:e}]", r = self.radius.to())
         } else {
             "".to_owned()
         };
