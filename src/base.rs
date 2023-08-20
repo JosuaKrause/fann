@@ -111,7 +111,7 @@ impl PartialOrd for DotDistanceCmp {
 
 impl Ord for DotDistanceCmp {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.total_cmp(&other.0)
+        self.0.total_cmp(&other.0).reverse()
     }
 }
 
