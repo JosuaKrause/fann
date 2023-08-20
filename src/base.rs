@@ -273,11 +273,11 @@ where
 {
     fn with_embed<F, R>(&self, index: usize, op: F) -> R
     where
-        F: Fn(&T) -> R;
+        F: FnOnce(&T) -> R;
 
     fn with_pair<F, R>(&self, a: usize, b: usize, op: F) -> R
     where
-        F: Fn(&T, &T) -> R;
+        F: FnOnce(&T, &T) -> R;
 
     fn dist_internal<C, I>(
         &self,
